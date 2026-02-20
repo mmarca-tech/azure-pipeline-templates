@@ -1,0 +1,258 @@
+parameters:
+  - name: skipManualApproval
+    type: boolean
+    default: false
+  - name: environment
+    type: string
+    default: 'live'
+  - name: jiraUrl
+    type: string
+    default: 'https://your-domain.atlassian.net'
+  - name: jiraUserEmail
+    type: string
+  - name: jiraApiToken
+    type: string
+  - name: projectKey
+    type: string
+    default: 'CHG'
+  - name: pipelineName
+    type: string
+  - name: ticketPrefix
+    type: string
+    default: 'CHG'
+  - name: componentName
+    type: string
+  - name: webhookUrl
+    type: string
+  - name: templateRepo
+    type: string
+    default: 'release-pipeline-templates'
+  - name: deployedStageDependsOn
+    type: string
+    default: 'Deploy_Live'
+  - name: createTicketDependsOn
+    type: object
+    default: []
+  - name: createTicketCondition
+    type: string
+    default: "and(eq( variables['isMainBranch'], 'true' ), ne( variables['isPullRequest'],  true ))"
+
+stages:
+  - stage: release_process_create_ticket
+    displayName: "Create JIRA Release Ticket"
+    dependsOn: ${{ parameters.createTicketDependsOn }}
+    condition: ${{ parameters.createTicketCondition }}
+    jobs:
+      - ${{ if eq(parameters.skipManualApproval, false) }}:
+        - job: approve_release_ticket
+          displayName: Approve JIRA Release Ticket Creation
+          pool: server
+          steps:
+            - task: ManualValidation@1
+              inputs:
+                notifyUsers: ''
+                instructions: 'Please approve to create the JIRA release ticket for the Live deployment.'
+                onTimeout: 'reject'
+                timeoutInMinutes: 8640  # 6 days timeout
+      - job: create_release_ticket
+        displayName: Create JIRA Release Ticket
+        ${{ if eq(parameters.skipManualApproval, false) }}:
+          dependsOn: approve_release_ticket
+        condition: succeeded()
+        workspace:
+          clean: all
+        steps:
+          - checkout: self
+          - checkout: ${{ parameters.templateRepo }}
+          - task: PowerShell@2
+            name: createTicket
+            displayName: "Generate Release Notes and Create JIRA Ticket"
+            env:
+              SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+            inputs:
+              targetType: 'filePath'
+              pwsh: true
+              filePath: '$(Build.SourcesDirectory)/${{ parameters.templateRepo }}/scripts/create-release-ticket.ps1'
+              arguments: >
+                -Environment "${{ parameters.environment }}"
+                -JiraUrl "${{ parameters.jiraUrl }}"
+                -ProjectKey "${{ parameters.projectKey }}"
+                -JiraUser "${{ parameters.jiraUserEmail }}"
+                -JiraToken "${{ parameters.jiraApiToken }}"
+                -PipelineName "${{ parameters.pipelineName }}"
+                -TicketPrefix "${{ parameters.ticketPrefix }}"
+                -ComponentName "${{ parameters.componentName }}"
+                -SourceRepoName "$(Build.Repository.Name)"
+
+  - stage: release_process_update_stakeholders
+    displayName: "Update Stakeholders"
+    dependsOn: [release_process_create_ticket]
+    condition: succeeded()
+    jobs:
+      - ${{ if eq(parameters.skipManualApproval, false) }}:
+        - job: approve_update_stakeholders
+          displayName: Approve Stakeholder Notification
+          pool: server
+          steps:
+            - task: ManualValidation@1
+              inputs:
+                notifyUsers: ''
+                instructions: 'Please approve to update the stakeholders for the Live deployment.'
+                onTimeout: 'reject'
+                timeoutInMinutes: 8640  # 6 days timeout
+      - job: update_stakeholders
+        displayName: Update Stakeholders via Teams
+        ${{ if eq(parameters.skipManualApproval, false) }}:
+          dependsOn: approve_update_stakeholders
+        condition: succeeded()
+        variables:
+          jiraTicketKey: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['createTicket.JiraTicketKey']]
+          jiraTicketUrl: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['createTicket.JiraTicketUrl']]
+          plannedStartDate: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['createTicket.PlannedStartDate']]
+          plannedEndDate: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['createTicket.PlannedEndDate']]
+        steps:
+          - checkout: self
+          - checkout: ${{ parameters.templateRepo }}
+          - task: PowerShell@2
+            displayName: "Send Teams Notification"
+            inputs:
+              targetType: 'filePath'
+              pwsh: true
+              filePath: '$(Build.SourcesDirectory)/${{ parameters.templateRepo }}/scripts/update-stakeholders.ps1'
+              arguments: >
+                -action "CREATED/UPDATED"
+                -JiraTicketKey "$(jiraTicketKey)"
+                -JiraTicketUrl "$(jiraTicketUrl)"
+                -PlannedStartDate "$(plannedStartDate)"
+                -PlannedEndDate "$(plannedEndDate)"
+                -PackageVersion "$(packageVersion)"
+                -WebhookUrl "${{ parameters.webhookUrl }}"
+                -ComponentName "${{ parameters.componentName }}"
+
+  - stage: release_process_cancel_release
+    displayName: "Cancel Release"
+    dependsOn: [release_process_create_ticket]
+    condition: succeeded()
+    jobs:
+      - job: approve_cancel_release
+        displayName: Approve Cancel Release
+        pool: server
+        steps:
+          - task: ManualValidation@1
+            inputs:
+              notifyUsers: ''
+              instructions: 'Please approve to cancel the release for the Live deployment.'
+              onTimeout: 'reject'
+              timeoutInMinutes: 8640  # 6 days timeout
+      - job: cancel_release_ticket
+        displayName: Cancel JIRA Release Ticket
+        dependsOn: approve_cancel_release
+        condition: succeeded()
+        variables:
+          jiraTicketKey: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['createTicket.JiraTicketKey']]
+        steps:
+          - checkout: self
+          - checkout: ${{ parameters.templateRepo }}
+          - task: PowerShell@2
+            displayName: "Cancel JIRA Ticket"
+            inputs:
+              targetType: 'filePath'
+              pwsh: true
+              filePath: '$(Build.SourcesDirectory)/${{ parameters.templateRepo }}/scripts/cancel-release-ticket.ps1'
+              arguments: >
+                -JiraUrl "${{ parameters.jiraUrl }}"
+                -JiraTicketKey "$(jiraTicketKey)"
+                -JiraUser "${{ parameters.jiraUserEmail }}"
+                -JiraToken "${{ parameters.jiraApiToken }}"
+      - job: update_stakeholders_cancel
+        displayName: Update Stakeholders of canceled release via Teams
+        dependsOn: cancel_release_ticket
+        condition: succeeded()
+        variables:
+          jiraTicketKey: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['createTicket.JiraTicketKey']]
+          jiraTicketUrl: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['createTicket.JiraTicketUrl']]
+          plannedStartDate: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['createTicket.PlannedStartDate']]
+          plannedEndDate: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['createTicket.PlannedEndDate']]
+        steps:
+          - checkout: self
+          - checkout: ${{ parameters.templateRepo }}
+          - task: PowerShell@2
+            displayName: "Send Teams Notification"
+            inputs:
+              targetType: 'filePath'
+              pwsh: true
+              filePath: '$(Build.SourcesDirectory)/${{ parameters.templateRepo }}/scripts/update-stakeholders.ps1'
+              arguments: >
+                -action "CANCELED"
+                -JiraTicketKey "$(jiraTicketKey)"
+                -JiraTicketUrl "$(jiraTicketUrl)"
+                -PlannedStartDate "$(plannedStartDate)"
+                -PlannedEndDate "$(plannedEndDate)"
+                -PackageVersion "$(packageVersion)"
+                -WebhookUrl "${{ parameters.webhookUrl }}"
+                -ComponentName "${{ parameters.componentName }}"
+
+  - stage: release_process_deployed_update_stakeholders
+    displayName: "Update stakeholders of Deployed Release"
+    dependsOn:
+      - ${{ parameters.deployedStageDependsOn }}
+    condition: succeeded()
+    jobs:
+      - job: approve_update_released
+        displayName: Approve Update of Deployed Release
+        pool: server
+        steps:
+          - task: ManualValidation@1
+            inputs:
+              notifyUsers: ''
+              instructions: 'Please approve to update the stakeholders for the deployed Live release.'
+              onTimeout: 'reject'
+              timeoutInMinutes: 8640  # 6 days timeout
+      - job: update_released_ticket
+        displayName: Update Released JIRA Tickets
+        dependsOn: approve_update_released
+        condition: succeeded()
+        variables:
+          jiraTicketKey: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['createTicket.JiraTicketKey']]
+          implementsIssues: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['createTicket.ImplementsIssues']]
+        steps:
+          - checkout: self
+          - checkout: ${{ parameters.templateRepo }}
+          - task: PowerShell@2
+            displayName: "Update Released JIRA Tickets"
+            inputs:
+              targetType: 'filePath'
+              pwsh: true
+              filePath: '$(Build.SourcesDirectory)/${{ parameters.templateRepo }}/scripts/update-released-tickets.ps1'
+              arguments: >
+                -JiraUrl "${{ parameters.jiraUrl }}"
+                -ImplementedTickets "$(implementsIssues)"
+                -JiraTicketKey "$(jiraTicketKey)"
+                -JiraUser "${{ parameters.jiraUserEmail }}"
+                -JiraToken "${{ parameters.jiraApiToken }}"
+      - job: update_stakeholders_deployed
+        displayName: Update Stakeholders of deployed release via Teams
+        condition: succeeded()
+        variables:
+          jiraTicketKey: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['createTicket.JiraTicketKey']]
+          jiraTicketUrl: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['createTicket.JiraTicketUrl']]
+          plannedStartDate: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['createTicket.PlannedStartDate']]
+          plannedEndDate: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['createTicket.PlannedEndDate']]
+        steps:
+          - checkout: self
+          - checkout: ${{ parameters.templateRepo }}
+          - task: PowerShell@2
+            displayName: "Send Teams Notification"
+            inputs:
+              targetType: 'filePath'
+              pwsh: true
+              filePath: '$(Build.SourcesDirectory)/${{ parameters.templateRepo }}/scripts/update-stakeholders.ps1'
+              arguments: >
+                -action "DEPLOYED"
+                -JiraTicketKey "$(jiraTicketKey)"
+                -JiraTicketUrl "$(jiraTicketUrl)"
+                -PlannedStartDate "$(plannedStartDate)"
+                -PlannedEndDate "$(plannedEndDate)"
+                -PackageVersion "$(packageVersion)"
+                -WebhookUrl "${{ parameters.webhookUrl }}"
+                -ComponentName "${{ parameters.componentName }}"
