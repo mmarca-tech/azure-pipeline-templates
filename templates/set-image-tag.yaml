@@ -1,0 +1,30 @@
+parameters:
+- name: azureServiceConnection
+  type: string
+
+- name: azureSubscription
+  type: string
+
+- name: sourceTag
+  type: string
+
+- name: newTag
+  type: string
+
+- name: containerRegistryName
+  type: string
+
+- name: images
+  type: object
+  default: []
+
+steps:
+  - ${{ each image in parameters.images }}:
+    - task: AzureCLI@2
+      displayName: 'Re-tag image: ${{ image }}'
+      inputs:
+        azureSubscription: ${{ parameters.azureServiceConnection }}
+        scriptType: bash
+        scriptLocation: inlineScript
+        inlineScript: |
+          az acr import --subscription ${{ parameters.azureSubscription }} --name ${{ parameters.containerRegistryName }} --source ${{ parameters.containerRegistryName }}.azurecr.io/${{ image }}:${{ parameters.sourceTag }} --image ${{ image }}:${{ parameters.newTag }} --force

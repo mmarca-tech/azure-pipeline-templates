@@ -1,0 +1,19 @@
+steps:
+  - task: CmdLine@2
+    displayName: Generate Allure report
+    inputs:
+      script: |
+        docker cp $(Build.ArtifactStagingDirectory)/allure-results allure_cmd:/
+        docker exec -i allure_cmd allure generate
+        docker cp allure_cmd:/allure-report $(Build.ArtifactStagingDirectory)/
+    condition: succeededOrFailed()
+
+  - task: AzureCLI@2
+    displayName: Upload Allure report
+    inputs:
+      azureSubscription: 'example-storage-service-connection'
+      scriptType: 'bash'
+      scriptLocation: 'inlineScript'
+      inlineScript: 'az storage blob upload-batch -d "\$web/$(Build.BuildNumber)" --account-name examplestorageaccount --subscription example-azure-service-connection --source . --auth-mode login'
+      workingDirectory: '$(Build.ArtifactStagingDirectory)/allure-report'
+    condition: succeededOrFailed()

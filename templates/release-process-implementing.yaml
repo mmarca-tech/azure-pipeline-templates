@@ -1,0 +1,88 @@
+parameters:
+  - name: jiraUrl
+    type: string
+    default: 'https://your-domain.atlassian.net'
+  - name: templateRepo
+    type: string
+    default: 'pipeline-templates'
+  - name: dependsOn
+    type: object
+    default: []
+
+stages:
+  - stage: release_process_implementing
+    displayName: "Transition ITSM Ticket to IMPLEMENTING"
+    dependsOn:
+      - ${{ if not(containsValue(parameters.dependsOn, 'release_process_create_ticket')) }}:
+        - release_process_create_ticket
+      - ${{ if not(containsValue(parameters.dependsOn, 'release_process_awaiting_implementation')) }}:
+        - release_process_awaiting_implementation
+      - ${{ if not(containsValue(parameters.dependsOn, 'release_process_update_stakeholders')) }}:
+        - release_process_update_stakeholders
+      - ${{ each dependency in parameters.dependsOn }}:
+        - ${{ dependency }}
+    condition: succeeded()
+    jobs:
+      - job: approve_transition_implementing
+        displayName: Approve Transition to IMPLEMENTING
+        pool: server
+        timeoutInMinutes: 43210
+        steps:
+          - task: ManualValidation@1
+            timeoutInMinutes: 43200
+            inputs:
+              notifyUsers: ''
+              instructions: 'Please approve to transition the ITSM ticket to Implementing for the Live deployment.'
+              onTimeout: 'reject'
+      - job: transition_release_ticket
+        displayName: Transition ITSM Ticket to IMPLEMENTING
+        dependsOn: approve_transition_implementing
+        condition: succeeded()
+        variables:
+          jiraTicketKey: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['createTicket.JiraTicketKey']]
+          jiraBotEmail: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['sharedVars.jiraBotEmail']]
+          jiraBotToken: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['sharedVars.jiraBotToken']]
+          jiraCloudId: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['sharedVars.jiraCloudId']]
+        steps:
+          - checkout: self
+          - checkout: ${{ parameters.templateRepo }}
+          - task: UseDotNet@2
+            displayName: Use .NET 10 SDK
+            inputs:
+              packageType: 'sdk'
+              version: '10.x'
+          - task: DotNetCoreCLI@2
+            displayName: "Require Jira manual release approval"
+            inputs:
+              command: 'custom'
+              custom: 'run'
+              arguments: >
+                --file "$(Build.SourcesDirectory)/${{ parameters.templateRepo }}/scripts/ReleaseProcess.cs"
+                --
+                check-jira-awaiting-implementation-status
+                -JiraUrl "${{ parameters.jiraUrl }}"
+                -JiraCloudId "$(jiraCloudId)"
+                -JiraTicketKey "$(jiraTicketKey)"
+                -JiraUser "$(jiraBotEmail)"
+                -JiraToken "$(jiraBotToken)"
+                -ExpectedStatusId "11505"
+                -ExpectedStatusName "Awaiting implementation"
+                -FailIfBlocked
+          - task: DotNetCoreCLI@2
+            displayName: "Transition JIRA Ticket"
+            inputs:
+              command: 'custom'
+              custom: 'run'
+              arguments: >
+                --file "$(Build.SourcesDirectory)/${{ parameters.templateRepo }}/scripts/ReleaseProcess.cs"
+                --
+                transition-jira-ticket
+                -JiraUrl "${{ parameters.jiraUrl }}"
+                -JiraCloudId "$(jiraCloudId)"
+                -JiraTicketKey "$(jiraTicketKey)"
+                -JiraUser "$(jiraBotEmail)"
+                -JiraToken "$(jiraBotToken)"
+                -TargetStatusId "11507"
+                -TargetStatusName "Implementing"
+                -SetActualStartDate
+                -Comment "Pipeline transitioned the ticket to Implementing and set Change start date at the start of live deployment."

@@ -1,0 +1,6 @@
+<Project>
+  <PropertyGroup>
+    <!-- Prefer repo nuget.config; do not fail restore on unreachable user-level feeds. -->
+    <RestoreIgnoreFailedSources>true</RestoreIgnoreFailedSources>
+  </PropertyGroup>
+</Project>

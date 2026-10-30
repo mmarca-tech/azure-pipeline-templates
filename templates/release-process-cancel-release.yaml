@@ -1,0 +1,95 @@
+parameters:
+  - name: jiraUrl
+    type: string
+    default: 'https://your-domain.atlassian.net'
+  - name: templateRepo
+    type: string
+    default: 'pipeline-templates'
+  - name: componentName
+    type: string
+
+stages:
+  - stage: release_process_cancel_release
+    displayName: "Cancel Release"
+    dependsOn: release_process_create_ticket
+    condition: in(dependencies.release_process_create_ticket.result, 'Succeeded', 'SucceededWithIssues')
+    jobs:
+      - job: approve_cancel_release
+        displayName: Approve Cancel Release
+        pool: server
+        timeoutInMinutes: 43210
+        steps:
+          - task: ManualValidation@1
+            timeoutInMinutes: 43200
+            inputs:
+              notifyUsers: ''
+              instructions: 'Please approve to cancel the release for the Live deployment. This does not stop sibling deploy stages; cancel the pipeline run if deployment must stop.'
+              onTimeout: 'reject'
+      - job: cancel_release_ticket
+        displayName: Cancel JIRA Release Ticket
+        dependsOn: approve_cancel_release
+        condition: succeeded()
+        variables:
+          jiraTicketKey: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['createTicket.JiraTicketKey']]
+          jiraBotEmail: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['sharedVars.jiraBotEmail']]
+          jiraBotToken: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['sharedVars.jiraBotToken']]
+          jiraCloudId: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['sharedVars.jiraCloudId']]
+        steps:
+          - checkout: self
+          - checkout: ${{ parameters.templateRepo }}
+          - task: UseDotNet@2
+            displayName: Use .NET 10 SDK
+            inputs:
+              packageType: 'sdk'
+              version: '10.x'
+          - task: DotNetCoreCLI@2
+            displayName: "Cancel JIRA Ticket"
+            inputs:
+              command: 'custom'
+              custom: 'run'
+              arguments: >
+                --file "$(Build.SourcesDirectory)/${{ parameters.templateRepo }}/scripts/ReleaseProcess.cs"
+                --
+                transition-jira-ticket
+                -JiraUrl "${{ parameters.jiraUrl }}"
+                -JiraCloudId "$(jiraCloudId)"
+                -JiraTicketKey "$(jiraTicketKey)"
+                -JiraUser "$(jiraBotEmail)"
+                -JiraToken "$(jiraBotToken)"
+                -TargetStatusName "Cancelled"
+      - job: update_stakeholders_cancel
+        displayName: Update Stakeholders of canceled release via Teams
+        dependsOn: cancel_release_ticket
+        condition: succeeded()
+        variables:
+          jiraTicketKey: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['createTicket.JiraTicketKey']]
+          jiraTicketUrl: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['createTicket.JiraTicketUrl']]
+          plannedStartDate: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['createTicket.PlannedStartDate']]
+          plannedEndDate: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['createTicket.PlannedEndDate']]
+          releaseTag: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['createTicket.ReleaseTag']]
+          releaseProcessWebhookUrl: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['sharedVars.releaseProcessWebhookUrl']]
+        steps:
+          - checkout: self
+          - checkout: ${{ parameters.templateRepo }}
+          - task: UseDotNet@2
+            displayName: Use .NET 10 SDK
+            inputs:
+              packageType: 'sdk'
+              version: '10.x'
+          - task: DotNetCoreCLI@2
+            displayName: "Send Teams Notification"
+            inputs:
+              command: 'custom'
+              custom: 'run'
+              arguments: >
+                --file "$(Build.SourcesDirectory)/${{ parameters.templateRepo }}/scripts/ReleaseProcess.cs"
+                --
+                update-stakeholders
+                -action "CANCELED"
+                -JiraTicketKey "$(jiraTicketKey)"
+                -JiraTicketUrl "$(jiraTicketUrl)"
+                -PlannedStartDate "$(plannedStartDate)"
+                -PlannedEndDate "$(plannedEndDate)"
+                -ReleaseTag "$(releaseTag)"
+                -WebhookUrl "$(releaseProcessWebhookUrl)"
+                -ComponentName "${{ parameters.componentName }}"

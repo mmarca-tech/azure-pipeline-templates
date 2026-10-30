@@ -1,0 +1,113 @@
+trigger:
+  branches:
+    include:
+      - main
+
+pr:
+  branches:
+    include:
+      - main
+
+parameters:
+  - name: tagPrefix
+    type: string
+    default: 'v'
+  - name: defaultBump
+    type: string
+    default: 'patch'
+    values:
+      - patch
+      - minor
+      - major
+  - name: autoRelease
+    type: boolean
+    default: false
+    displayName: Auto-run release stage (no manual click)
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  isMainBranch: $[eq(variables['Build.SourceBranch'], 'refs/heads/main')]
+  isPullRequest: $[eq(variables['Build.Reason'], 'PullRequest')]
+
+stages:
+  - stage: test
+    displayName: Test
+    jobs:
+      - job: validate_and_test
+        displayName: Validate and run unit tests
+        steps:
+          - checkout: self
+            fetchDepth: 0
+
+          - task: UseDotNet@2
+            displayName: Use .NET 10 SDK
+            inputs:
+              packageType: 'sdk'
+              version: '10.x'
+
+          - task: DotNetCoreCLI@2
+            displayName: Validate repository
+            inputs:
+              command: 'custom'
+              custom: 'run'
+              arguments: >
+                --file ./scripts/VersionTag.cs
+                --
+                validate
+
+          - task: DotNetCoreCLI@2
+            displayName: Run ReleaseTools unit tests
+            inputs:
+              command: 'test'
+              projects: 'tests/ReleaseTools.Tests/ReleaseTools.Tests.csproj'
+              arguments: '--configuration Release'
+
+  # Manual stage trigger: if you do not run this stage, the pipeline succeeds after tests.
+  # ManualValidation reject cannot succeed the run; a manual stage avoids that ADO limitation.
+  # Note: manually triggered stages cannot use dependsOn — start release only after Test has succeeded.
+  - stage: release
+    displayName: Release version tag
+    ${{ if eq(parameters.autoRelease, true) }}:
+      dependsOn: test
+      condition: and(succeeded(), eq(variables['isMainBranch'], 'true'), ne(variables['isPullRequest'], 'true'))
+    ${{ else }}:
+      trigger: manual
+      condition: and(eq(variables['isMainBranch'], 'true'), ne(variables['isPullRequest'], 'true'))
+    jobs:
+      - job: tag_repository
+        displayName: Create and push version tag
+        steps:
+          - checkout: self
+            persistCredentials: true
+            fetchDepth: 0
+
+          - task: UseDotNet@2
+            displayName: Use .NET 10 SDK
+            inputs:
+              packageType: 'sdk'
+              version: '10.x'
+
+          - task: DotNetCoreCLI@2
+            name: createVersionTag
+            displayName: Compute and push semantic version tag
+            env:
+              SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+            inputs:
+              command: 'custom'
+              custom: 'run'
+              arguments: >
+                --file ./scripts/VersionTag.cs
+                --
+                create-version-tag
+                -TagPrefix ${{ parameters.tagPrefix }}
+                -DefaultBump ${{ parameters.defaultBump }}
+
+          - script: |
+              echo "Created tag: ${CREATED_TAG}"
+              echo "Detected bump: ${DETECTED_BUMP}"
+            displayName: Show created tag
+            env:
+              CREATED_TAG: $(CreatedTag)
+              DETECTED_BUMP: $(DetectedBump)

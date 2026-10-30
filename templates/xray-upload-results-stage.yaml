@@ -1,0 +1,197 @@
+parameters:
+  # ---- Required ----
+  # Service connection and Key Vault holding the Xray/Jira secrets
+  - name: azureSubscription
+    type: string
+  - name: keyVaultName
+    type: string
+  # Pipeline artifact (published by an earlier job) with the test results
+  - name: resultsArtifactName
+    type: string
+  # Jira project where tests and the execution are created/updated
+  - name: projectKey
+    type: string
+
+  # ---- Optional: what to upload ----
+  # File or folder inside the artifact, empty means the whole artifact
+  - name: resultsPath
+    type: string
+    default: ''
+  # cucumber-specflow | allure-xml | cucumber-json | allure-json | junit-xml | nunit-xml
+  - name: testType
+    type: string
+    default: nunit-xml
+
+  # ---- Optional: Xray execution (empty = not sent, a new execution is created without plan/links) ----
+  - name: planKey
+    type: string
+    default: ''
+  - name: executionKey
+    type: string
+    default: ''
+  - name: summary
+    type: string
+    default: ''
+  - name: description
+    type: string
+    default: ''
+  - name: releaseVersion
+    type: string
+    default: ''
+  - name: environments
+    type: string
+    default: ''
+  - name: issueKey
+    type: string
+    default: ''
+  - name: issueLinkType
+    type: string
+    default: ''
+
+  # ---- Optional: Xray and Jira instances (not secrets) ----
+  # Xray host only, the client appends /api/v2
+  - name: xrayUrl
+    type: string
+    default: https://xray.cloud.getxray.app
+  - name: jiraUrl
+    type: string
+    default: https://your-domain.atlassian.net
+
+  # ---- Optional: stage/job wiring ----
+  - name: stageName
+    type: string
+    default: Xray_Upload_Results
+  - name: stageDisplayName
+    type: string
+    default: Upload test results to Xray
+  - name: jobName
+    type: string
+    default: xray_upload_results
+  - name: jobDisplayName
+    type: string
+    default: Upload test results to Xray
+  - name: dependsOn
+    type: object
+    default: []
+  # succeededOrFailed so the results of a failing test run are still uploaded
+  - name: condition
+    type: string
+    default: succeededOrFailed()
+  - name: poolName
+    type: string
+    default: example-agent-pool
+
+  # ---- Optional: package, feed and secrets ----
+  - name: nodeVersion
+    type: string
+    default: 20.x
+  - name: packageSpec
+    type: string
+    default: xray-console-client@2.2.1
+  - name: npmFeedUrl
+    type: string
+    default: https://pkgs.dev.azure.com/your-organization/_packaging/your-testing-feed/npm/registry/
+  - name: npmUserConfig
+    type: string
+    default: $(Agent.TempDirectory)/xray-upload.npmrc
+  - name: installDirectory
+    type: string
+    default: $(Agent.TempDirectory)/xray-console-client-install
+  - name: keyVaultSecretsFilter
+    type: string
+    default: jira-basic-token,jira-client-id,jira-client-secret
+
+stages:
+  - stage: ${{ parameters.stageName }}
+    displayName: ${{ parameters.stageDisplayName }}
+    ${{ if ne(length(parameters.dependsOn), 0) }}:
+      dependsOn: ${{ parameters.dependsOn }}
+    condition: ${{ parameters.condition }}
+    jobs:
+      - job: ${{ parameters.jobName }}
+        displayName: ${{ parameters.jobDisplayName }}
+        pool:
+          name: ${{ parameters.poolName }}
+        steps:
+          - checkout: none
+
+          - download: current
+            artifact: ${{ parameters.resultsArtifactName }}
+            displayName: Download test results
+
+          - task: NodeTool@0
+            displayName: Use Node.js ${{ parameters.nodeVersion }}
+            inputs:
+              versionSpec: ${{ parameters.nodeVersion }}
+
+          - task: Bash@3
+            displayName: Prepare npm auth file
+            inputs:
+              targetType: inline
+              script: |
+                printf 'registry=${{ parameters.npmFeedUrl }}\nalways-auth=true\n' > "${{ parameters.npmUserConfig }}"
+                mkdir -p "${{ parameters.installDirectory }}"
+
+          - task: npmAuthenticate@0
+            displayName: Authenticate Azure Artifacts npm feed
+            inputs:
+              workingFile: ${{ parameters.npmUserConfig }}
+
+          - task: AzureKeyVault@2
+            displayName: Load Xray secrets
+            inputs:
+              azureSubscription: ${{ parameters.azureSubscription }}
+              KeyVaultName: ${{ parameters.keyVaultName }}
+              SecretsFilter: ${{ parameters.keyVaultSecretsFilter }}
+
+          - task: Bash@3
+            displayName: Install xray-console-client
+            inputs:
+              targetType: inline
+              script: npm install --no-save --prefix "${{ parameters.installDirectory }}" "${{ parameters.packageSpec }}"
+            env:
+              NPM_CONFIG_USERCONFIG: ${{ parameters.npmUserConfig }}
+
+          - task: Bash@3
+            displayName: Upload results to Xray
+            inputs:
+              targetType: inline
+              script: |
+                set -euo pipefail
+
+                results="$PIPELINE_WORKSPACE/$RESULTS_ARTIFACT"
+                if [ -n "$RESULTS_PATH" ]; then results="$results/$RESULTS_PATH"; fi
+                if [ ! -e "$results" ]; then echo "Results not found: $results"; exit 1; fi
+
+                args=(--tt "$TEST_TYPE" --f "$results" --pk "$PROJECT_KEY"
+                      --xu "$XRAY_BASE_URL" --ci "$XRAY_CLIENT_ID" --cs "$XRAY_CLIENT_SECRET"
+                      --ju "$JIRA_URL" --jbt "$JIRA_BASIC_TOKEN")
+                [ -n "$PLAN_KEY" ]        && args+=(--pn "$PLAN_KEY")
+                [ -n "$EXECUTION_KEY" ]   && args+=(--ek "$EXECUTION_KEY")
+                [ -n "$SUMMARY" ]         && args+=(--s "$SUMMARY")
+                [ -n "$DESCRIPTION" ]     && args+=(--d "$DESCRIPTION")
+                [ -n "$RELEASE_VERSION" ] && args+=(--rv "$RELEASE_VERSION")
+                [ -n "$ENVIRONMENTS" ]    && args+=(--e "$ENVIRONMENTS")
+                [ -n "$ISSUE_KEY" ]       && args+=(--i "$ISSUE_KEY")
+                [ -n "$ISSUE_LINK_TYPE" ] && args+=(--ilt "$ISSUE_LINK_TYPE")
+
+                "${{ parameters.installDirectory }}/node_modules/.bin/xray-console-client" "${args[@]}"
+            env:
+              PIPELINE_WORKSPACE: $(Pipeline.Workspace)
+              RESULTS_ARTIFACT: ${{ parameters.resultsArtifactName }}
+              RESULTS_PATH: ${{ parameters.resultsPath }}
+              TEST_TYPE: ${{ parameters.testType }}
+              PROJECT_KEY: ${{ parameters.projectKey }}
+              PLAN_KEY: ${{ parameters.planKey }}
+              EXECUTION_KEY: ${{ parameters.executionKey }}
+              SUMMARY: ${{ parameters.summary }}
+              DESCRIPTION: ${{ parameters.description }}
+              RELEASE_VERSION: ${{ parameters.releaseVersion }}
+              ENVIRONMENTS: ${{ parameters.environments }}
+              ISSUE_KEY: ${{ parameters.issueKey }}
+              ISSUE_LINK_TYPE: ${{ parameters.issueLinkType }}
+              XRAY_BASE_URL: ${{ parameters.xrayUrl }}
+              XRAY_CLIENT_ID: $(jira-client-id)
+              XRAY_CLIENT_SECRET: $(jira-client-secret)
+              JIRA_URL: ${{ parameters.jiraUrl }}
+              JIRA_BASIC_TOKEN: $(jira-basic-token)

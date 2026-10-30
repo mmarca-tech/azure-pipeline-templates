@@ -1,0 +1,330 @@
+parameters:
+  - name: stageName
+    type: string
+    default: Manso_Xray_Implementation
+  - name: stageDisplayName
+    type: string
+    default: Manso Xray Test Implementation
+  - name: jobName
+    type: string
+    default: manso_xray_implementation
+  - name: jobDisplayName
+    type: string
+    default: Run Manso from Jira ticket in commit message
+  - name: dependsOn
+    type: object
+    default: []
+  - name: condition
+    type: string
+    default: and(eq(variables['Build.SourceBranch'], 'refs/heads/main'), ne(variables['Build.Reason'], 'PullRequest'))
+  - name: runOnlyWhenChangedPaths
+    type: object
+    default: []
+  - name: poolName
+    type: string
+    default: example-agent-pool
+  - name: templateRepo
+    type: string
+    default: pipeline-templates
+  - name: azureSubscription
+    type: string
+  - name: keyVaultName
+    type: string
+  - name: keyVaultSecretsFilter
+    type: string
+    default: manso-testing-agent-username,manso-testing-agent-jira-url,manso-testing-agent-jira-token,manso-testing-agent-azure-devops-pat,manso-testing-agent-llm-provider,manso-testing-agent-llm-api-key,manso-testing-agent-llm-model,manso-testing-agent-otel-provider,manso-testing-agent-otel-enabled,manso-testing-agent-otel-project-name,manso-testing-agent-otel-endpoint,manso-testing-agent-otel-public-key,manso-testing-agent-otel-secret-key,manso-testing-agent-otel-batch,manso-testing-agent-otel-codex-forward,manso-testing-agent-openinference-hide-inputs,manso-testing-agent-openinference-hide-outputs,manso-testing-agent-xray-base-url,manso-testing-agent-client-id,manso-testing-agent-client-secret,manso-testing-agent-xray-test-link-type,manso-testing-agent-xray-test-link-direction,manso-testing-agent-enable-confluence
+  - name: nodeVersion
+    type: string
+    default: 20.x
+  - name: dotnetSdkVersion
+    type: string
+    default: 10.x
+  - name: packageSpec
+    type: string
+    default: manso-testing-agent@2.6.0
+  - name: memoryRoot
+    type: string
+    default: https://dev.azure.com/your-organization/your-project/_git/your-agent-repository
+  - name: memoryEnabled
+    type: string
+    default: 'true'
+  - name: memoryCacheDir
+    type: string
+    default: $(Agent.TempDirectory)/manso-memory-cabins
+  - name: memoryBranch
+    type: string
+    default: main
+  - name: memoryStrict
+    type: string
+    default: 'false'
+  - name: repositoryName
+    type: string
+    default: ''
+  - name: targetBranch
+    type: string
+    default: main
+  - name: npmrcPath
+    type: string
+    default: .manso/agent-package/.npmrc
+  - name: outputDirectory
+    type: string
+    default: $(Pipeline.Workspace)/manso-testing-agent-implementation-output
+  - name: agentWorkDirectory
+    type: string
+    default: $(Agent.TempDirectory)/manso-testing-agent-implementation
+  - name: npmUserConfig
+    type: string
+    default: $(Agent.TempDirectory)/manso-testing-agent.npmrc
+  - name: healAttempts
+    type: number
+    default: 4
+  - name: testDesignEnabled
+    type: boolean
+    default: true
+  - name: reuseBranchIfPossible
+    type: boolean
+    default: true
+  - name: publishArtifactName
+    type: string
+    default: manso-testing-agent-implementation-output
+
+stages:
+  - ${{ if ne(length(parameters.runOnlyWhenChangedPaths), 0) }}:
+    - stage: ${{ format('Detect_{0}_Changes', parameters.stageName) }}
+      displayName: Detect changes for ${{ parameters.stageDisplayName }}
+      ${{ if ne(length(parameters.dependsOn), 0) }}:
+        dependsOn: ${{ parameters.dependsOn }}
+      condition: ${{ parameters.condition }}
+      jobs:
+        - job: detect_changed_paths
+          displayName: Detect changed paths
+          pool:
+            name: ${{ parameters.poolName }}
+          steps:
+            - checkout: self
+              fetchDepth: 0
+
+            - task: PowerShell@2
+              name: detectChangedPaths
+              displayName: Check changed path filters
+              env:
+                RUN_ONLY_WHEN_CHANGED_PATHS: ${{ join('|', parameters.runOnlyWhenChangedPaths) }}
+              inputs:
+                pwsh: true
+                targetType: inline
+                script: |
+                  $ErrorActionPreference = 'Stop'
+
+                  $pathFilters = @($env:RUN_ONLY_WHEN_CHANGED_PATHS -split '\|' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+
+                  function Normalize-GitPath {
+                    param([string] $Path)
+
+                    if ([string]::IsNullOrWhiteSpace($Path)) {
+                      return ''
+                    }
+
+                    $normalizedPath = $Path.Replace('\', '/').Trim()
+                    while ($normalizedPath.StartsWith('./', [System.StringComparison]::Ordinal)) {
+                      $normalizedPath = $normalizedPath.Substring(2)
+                    }
+
+                    return $normalizedPath.TrimStart('/')
+                  }
+
+                  function Test-ChangedPathMatch {
+                    param(
+                      [string] $ChangedFile,
+                      [string] $PathFilter
+                    )
+
+                    $changedFilePath = Normalize-GitPath $ChangedFile
+                    $pathFilterValue = Normalize-GitPath $PathFilter
+
+                    if ([string]::IsNullOrWhiteSpace($pathFilterValue)) {
+                      return $false
+                    }
+
+                    if ($pathFilterValue.EndsWith('/', [System.StringComparison]::Ordinal)) {
+                      return $changedFilePath.StartsWith($pathFilterValue, [System.StringComparison]::OrdinalIgnoreCase)
+                    }
+
+                    return $changedFilePath.Equals($pathFilterValue, [System.StringComparison]::OrdinalIgnoreCase) -or
+                      $changedFilePath.StartsWith("$pathFilterValue/", [System.StringComparison]::OrdinalIgnoreCase)
+                  }
+
+                  $sourceVersion = if ($env:BUILD_SOURCEVERSION) { $env:BUILD_SOURCEVERSION } else { 'HEAD' }
+                  $sourceRevision = git rev-parse $sourceVersion
+                  $parentRevision = "$sourceRevision^"
+                  $changedFiles = @()
+                  $changedFilesResolved = $false
+
+                  if ($env:BUILD_REASON -eq 'PullRequest' -and $env:SYSTEM_PULLREQUEST_TARGETBRANCH) {
+                    git fetch origin $env:SYSTEM_PULLREQUEST_TARGETBRANCH --depth=1 2>$null
+
+                    if (git rev-parse --verify FETCH_HEAD 2>$null) {
+                      $baseRevision = git merge-base FETCH_HEAD $sourceRevision
+                      $changedFiles = @(git diff --name-only $baseRevision $sourceRevision)
+                      $changedFilesResolved = $true
+                    }
+                  }
+
+                  if (-not $changedFilesResolved) {
+                    if (git rev-parse --verify $parentRevision 2>$null) {
+                      $changedFiles = @(git diff --name-only $parentRevision $sourceRevision)
+                    } else {
+                      $changedFiles = @(git show --format= --name-only $sourceRevision)
+                    }
+                  }
+
+                  $changedFiles = @($changedFiles | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+                  $matchedFiles = @(
+                    foreach ($changedFile in $changedFiles) {
+                      foreach ($pathFilter in $pathFilters) {
+                        if (Test-ChangedPathMatch -ChangedFile $changedFile -PathFilter $pathFilter) {
+                          $changedFile
+                          break
+                        }
+                      }
+                    }
+                  )
+                  $changedPathMatched = $matchedFiles.Count -gt 0
+
+                  Write-Host 'Changed path filters:'
+                  $pathFilters | ForEach-Object { Write-Host "  $_" }
+
+                  Write-Host 'Changed files:'
+                  if ($changedFiles.Count -eq 0) {
+                    Write-Host '  <none>'
+                  } else {
+                    $changedFiles | ForEach-Object { Write-Host "  $_" }
+                  }
+
+                  Write-Host 'Matched files:'
+                  if ($matchedFiles.Count -eq 0) {
+                    Write-Host '  <none>'
+                  } else {
+                    $matchedFiles | ForEach-Object { Write-Host "  $_" }
+                  }
+
+                  Write-Host "changedPathMatched=$changedPathMatched"
+                  Write-Host "##vso[task.setvariable variable=changedPathMatched;isOutput=true]$($changedPathMatched.ToString().ToLowerInvariant())"
+
+  - stage: ${{ parameters.stageName }}
+    displayName: ${{ parameters.stageDisplayName }}
+    ${{ if or(ne(length(parameters.dependsOn), 0), ne(length(parameters.runOnlyWhenChangedPaths), 0)) }}:
+      dependsOn:
+        - ${{ if ne(length(parameters.runOnlyWhenChangedPaths), 0) }}:
+          - ${{ format('Detect_{0}_Changes', parameters.stageName) }}
+        - ${{ each dependency in parameters.dependsOn }}:
+          - ${{ dependency }}
+    ${{ if ne(length(parameters.runOnlyWhenChangedPaths), 0) }}:
+      condition: and(${{ parameters.condition }}, in(dependencies.${{ format('Detect_{0}_Changes', parameters.stageName) }}.result, 'Succeeded', 'SucceededWithIssues'), eq(dependencies.${{ format('Detect_{0}_Changes', parameters.stageName) }}.outputs['detect_changed_paths.detectChangedPaths.changedPathMatched'], 'true'))
+    ${{ if eq(length(parameters.runOnlyWhenChangedPaths), 0) }}:
+      condition: ${{ parameters.condition }}
+    jobs:
+      - job: ${{ parameters.jobName }}
+        displayName: ${{ parameters.jobDisplayName }}
+        pool:
+          name: ${{ parameters.poolName }}
+        steps:
+          - checkout: self
+            path: s/repository
+            fetchDepth: 0
+            persistCredentials: true
+
+          - checkout: ${{ parameters.templateRepo }}
+            path: s/${{ parameters.templateRepo }}
+
+          - task: PowerShell@2
+            displayName: Prepare Manso output and npm auth file
+            inputs:
+              pwsh: true
+              targetType: inline
+              script: |
+                New-Item -ItemType Directory -Path '${{ parameters.outputDirectory }}' -Force | Out-Null
+                Copy-Item -LiteralPath '$(Pipeline.Workspace)/s/repository/${{ parameters.npmrcPath }}' -Destination '${{ parameters.npmUserConfig }}' -Force
+
+          - task: NodeTool@0
+            displayName: Use Node.js ${{ parameters.nodeVersion }}
+            inputs:
+              versionSpec: ${{ parameters.nodeVersion }}
+
+          - task: UseDotNet@2
+            displayName: Use .NET SDK ${{ parameters.dotnetSdkVersion }}
+            inputs:
+              packageType: sdk
+              version: ${{ parameters.dotnetSdkVersion }}
+
+          - task: NuGetAuthenticate@1
+            displayName: Authenticate Azure Artifacts NuGet feeds
+
+          - task: npmAuthenticate@0
+            displayName: Authenticate Azure Artifacts npm feed
+            inputs:
+              workingFile: ${{ parameters.npmUserConfig }}
+
+          - task: AzureKeyVault@2
+            displayName: Load manso-testing-agent secrets
+            inputs:
+              azureSubscription: ${{ parameters.azureSubscription }}
+              KeyVaultName: ${{ parameters.keyVaultName }}
+              SecretsFilter: ${{ parameters.keyVaultSecretsFilter }}
+
+          - task: PowerShell@2
+            displayName: Run Manso Xray test implementation
+            env:
+              JIRA_URL: $(manso-testing-agent-jira-url)
+              JIRA_USERNAME: $(manso-testing-agent-username)
+              JIRA_API_TOKEN: $(manso-testing-agent-jira-token)
+              CONFLUENCE_ENABLED: $(manso-testing-agent-enable-confluence)
+              CONFLUENCE_URL: $(manso-testing-agent-jira-url)
+              CONFLUENCE_USERNAME: $(manso-testing-agent-username)
+              CONFLUENCE_API_TOKEN: $(manso-testing-agent-jira-token)
+              AZURE_DEVOPS_PAT: $(manso-testing-agent-azure-devops-pat)
+              LLM_PROVIDER: $(manso-testing-agent-llm-provider)
+              LLM_API_KEY: $(manso-testing-agent-llm-api-key)
+              LLM_MODEL: $(manso-testing-agent-llm-model)
+              OTEL_PROVIDER: $(manso-testing-agent-otel-provider)
+              OTEL_ENABLED: $(manso-testing-agent-otel-enabled)
+              OTEL_PROJECT_NAME: $(manso-testing-agent-otel-project-name)
+              OTEL_ENDPOINT: $(manso-testing-agent-otel-endpoint)
+              OTEL_PUBLIC_KEY: $(manso-testing-agent-otel-public-key)
+              OTEL_SECRET_KEY: $(manso-testing-agent-otel-secret-key)
+              OTEL_BATCH: $(manso-testing-agent-otel-batch)
+              MANSO_CODEX_FORWARD_OTEL: $(manso-testing-agent-otel-codex-forward)
+              MANSO_MEMORY_ROOT: ${{ parameters.memoryRoot }}
+              MANSO_MEMORY_ENABLED: ${{ parameters.memoryEnabled }}
+              MANSO_MEMORY_CACHE_DIR: ${{ parameters.memoryCacheDir }}
+              MANSO_MEMORY_BRANCH: ${{ parameters.memoryBranch }}
+              MANSO_MEMORY_STRICT: ${{ parameters.memoryStrict }}
+              OPENINFERENCE_HIDE_INPUTS: $(manso-testing-agent-openinference-hide-inputs)
+              OPENINFERENCE_HIDE_OUTPUTS: $(manso-testing-agent-openinference-hide-outputs)
+              XRAY_BASE_URL: $(manso-testing-agent-xray-base-url)
+              XRAY_CLIENT_ID: $(manso-testing-agent-client-id)
+              XRAY_CLIENT_SECRET: $(manso-testing-agent-client-secret)
+              XRAY_TEST_LINK_TYPE: $(manso-testing-agent-xray-test-link-type)
+              XRAY_TEST_LINK_DIRECTION: $(manso-testing-agent-xray-test-link-direction)
+              SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+              NPM_CONFIG_USERCONFIG: ${{ parameters.npmUserConfig }}
+            inputs:
+              pwsh: true
+              targetType: inline
+              script: |
+                dotnet run --file '$(Pipeline.Workspace)/s/${{ parameters.templateRepo }}/scripts/MansoXrayImplementation.cs' -- `
+                  --commit-sha '$(Build.SourceVersion)' `
+                  --repository-directory '$(Pipeline.Workspace)/s/repository' `
+                  --out '${{ parameters.outputDirectory }}' `
+                  --package-spec '${{ parameters.packageSpec }}' `
+                  --work-directory '${{ parameters.agentWorkDirectory }}' `
+                  --npm-user-config '${{ parameters.npmUserConfig }}' `
+                  --repository-name '${{ parameters.repositoryName }}' `
+                  --target-branch '${{ parameters.targetBranch }}' `
+                  --heal-attempts '${{ parameters.healAttempts }}' `
+                  --test-design-enabled '${{ parameters.testDesignEnabled }}' `
+                  --reuse-branch-if-possible '${{ parameters.reuseBranchIfPossible }}'
+
+          - publish: ${{ parameters.outputDirectory }}
+            artifact: ${{ parameters.publishArtifactName }}
+            displayName: Publish Manso implementation output
+            condition: succeededOrFailed()

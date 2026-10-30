@@ -1,0 +1,152 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1320 1240" role="img" aria-labelledby="title desc">
+  <title id="title">Release process flow</title>
+  <desc id="desc">Static flow diagram for the release process pipeline templates.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569"/>
+    </marker>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#0f172a" flood-opacity="0.12"/>
+    </filter>
+    <style>
+      text {
+        font-family: "Segoe UI", Arial, sans-serif;
+        fill: #0f172a;
+      }
+      .title {
+        font-size: 30px;
+        font-weight: 700;
+      }
+      .subtitle {
+        font-size: 14px;
+        fill: #475569;
+      }
+      .node {
+        stroke-width: 2.5;
+        rx: 18;
+        ry: 18;
+        filter: url(#shadow);
+      }
+      .auto {
+        fill: #e8f5e9;
+        stroke: #2e7d32;
+      }
+      .approval {
+        fill: #fff8e1;
+        stroke: #f9a825;
+      }
+      .external {
+        fill: #e3f2fd;
+        stroke: #1565c0;
+      }
+      .failure {
+        fill: #ffebee;
+        stroke: #c62828;
+      }
+      .legend {
+        fill: #f8fafc;
+        stroke: #cbd5e1;
+        stroke-width: 1.5;
+        rx: 14;
+        ry: 14;
+      }
+      .label {
+        font-size: 22px;
+        font-weight: 700;
+      }
+      .meta {
+        font-size: 13px;
+        fill: #475569;
+      }
+      .line {
+        fill: none;
+        stroke: #475569;
+        stroke-width: 3;
+        marker-end: url(#arrow);
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      .legend-text {
+        font-size: 14px;
+        fill: #334155;
+      }
+    </style>
+  </defs>
+
+  <rect x="0" y="0" width="1320" height="1240" fill="#ffffff"/>
+
+  <text class="title" x="48" y="56">Release Process Flow</text>
+  <text class="subtitle" x="48" y="84">Static diagram for README and VS Code markdown preview</text>
+
+  <rect class="legend" x="936" y="36" width="330" height="142"/>
+  <rect class="auto" x="962" y="60" width="24" height="24" rx="6" ry="6"/>
+  <text class="legend-text" x="998" y="77">Automatic stage</text>
+  <rect class="approval" x="962" y="94" width="24" height="24" rx="6" ry="6"/>
+  <text class="legend-text" x="998" y="111">Stage with manual approval</text>
+  <rect class="external" x="962" y="128" width="24" height="24" rx="6" ry="6"/>
+  <text class="legend-text" x="998" y="145">External dependency or deployment stage</text>
+  <rect class="failure" x="962" y="162" width="24" height="24" rx="6" ry="6"/>
+  <text class="legend-text" x="998" y="179">Failure-handling stage</text>
+
+  <path class="line" d="M 660 208 L 660 248"/>
+  <path class="line" d="M 660 348 L 660 388"/>
+  <path class="line" d="M 660 508 L 660 534"/>
+  <path class="line" d="M 660 534 L 310 534 L 310 578"/>
+  <path class="line" d="M 660 534 L 1010 534 L 1010 578"/>
+  <path class="line" d="M 660 508 L 660 578"/>
+  <path class="line" d="M 660 666 L 660 716"/>
+  <path class="line" d="M 310 666 L 310 844 L 660 844 L 660 894"/>
+  <path class="line" d="M 660 804 L 660 894"/>
+  <path class="line" d="M 660 1002 L 660 1050"/>
+  <path class="line" d="M 500 1104 L 462 1104"/>
+  <path class="line" d="M 800 1104 L 838 1104"/>
+
+  <rect class="node external" x="500" y="120" width="320" height="88"/>
+  <text class="label" x="660" y="158" text-anchor="middle">Deploy_Test</text>
+  <text class="meta" x="660" y="184" text-anchor="middle">example value for createTicketDependsOn</text>
+
+  <rect class="node auto" x="500" y="260" width="320" height="88"/>
+  <text class="label" x="660" y="298" text-anchor="middle">Create Jira Ticket</text>
+  <text class="meta" x="660" y="324" text-anchor="middle">stage: release_process_create_ticket</text>
+
+  <rect class="node approval" x="500" y="400" width="320" height="108"/>
+  <text class="label" x="660" y="442" text-anchor="middle">Secret, Approval &amp; Create Jobs</text>
+  <text class="meta" x="660" y="470" text-anchor="middle">GetSecrets → approval → create_release_ticket</text>
+  <text class="meta" x="660" y="490" text-anchor="middle">creates ticket key, URL, dates, and linked issues</text>
+
+  <rect class="node approval" x="150" y="578" width="320" height="88"/>
+  <text class="label" x="310" y="616" text-anchor="middle">Update Stakeholders</text>
+  <text class="meta" x="310" y="642" text-anchor="middle">stage: release_process_update_stakeholders</text>
+
+  <rect class="node external" x="500" y="578" width="320" height="88"/>
+  <text class="label" x="660" y="616" text-anchor="middle">Deploy_Pt</text>
+  <text class="meta" x="660" y="642" text-anchor="middle">configurable PT deployment stage name</text>
+
+  <rect class="node approval" x="850" y="578" width="320" height="88"/>
+  <text class="label" x="1010" y="616" text-anchor="middle">Cancel Release</text>
+  <text class="meta" x="1010" y="642" text-anchor="middle">stage: release_process_cancel_release</text>
+
+  <rect class="node auto" x="500" y="716" width="320" height="88"/>
+  <text class="label" x="660" y="754" text-anchor="middle">Manual Release Approval</text>
+  <text class="meta" x="660" y="780" text-anchor="middle">stage: release_process_awaiting_implementation</text>
+
+  <rect class="node approval" x="500" y="894" width="320" height="108"/>
+  <text class="label" x="660" y="936" text-anchor="middle">Implementing</text>
+  <text class="meta" x="660" y="964" text-anchor="middle">stage: release_process_implementing</text>
+  <text class="meta" x="660" y="984" text-anchor="middle">depends on stakeholder update and awaiting implementation</text>
+
+  <rect class="node external" x="500" y="1050" width="300" height="108"/>
+  <text class="label" x="650" y="1092" text-anchor="middle">Deploy_Live</text>
+  <text class="meta" x="650" y="1120" text-anchor="middle">live deployment stage</text>
+  <text class="meta" x="650" y="1140" text-anchor="middle">example value for deployedStageDependsOn</text>
+
+  <rect class="node failure" x="32" y="1050" width="430" height="108"/>
+  <text class="label" x="247" y="1092" text-anchor="middle">Release Failed</text>
+  <text class="meta" x="247" y="1120" text-anchor="middle">stage: release_process_failed_update_stakeholders</text>
+  <text class="meta" x="247" y="1140" text-anchor="middle">transitions the Jira ticket and notifies stakeholders</text>
+
+  <rect class="node approval" x="838" y="1050" width="430" height="108"/>
+  <text class="label" x="1053" y="1092" text-anchor="middle">Release Deployed</text>
+  <text class="meta" x="1053" y="1120" text-anchor="middle">stage: release_process_deployed_update_stakeholders</text>
+  <text class="meta" x="1053" y="1140" text-anchor="middle">updates released Jira tickets and stakeholders</text>
+</svg>

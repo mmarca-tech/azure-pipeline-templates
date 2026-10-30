@@ -1,0 +1,67 @@
+parameters:
+  - name: dotnetSdkVersion
+    type: string
+    default: 10.0.x
+  - name: reportPortalEnabled
+    type: boolean
+    default: true
+  - name: azureSubscription
+    type: string
+    default: ''
+  - name: keyVaultName
+    type: string
+    default: ''
+  - name: projectsToRestore
+    type: string
+    default: src/**/*.csproj
+  - name: nugetConfigPath
+    type: string
+    default: src/nuget.config
+  - name: solutionPath
+    type: string
+    default: src/*.sln
+
+steps:
+  - task: UseDotNet@2
+    displayName: Use .NET SDK
+    inputs:
+      packageType: sdk
+      version: ${{ parameters.dotnetSdkVersion }}
+
+  - ${{ if and(eq(parameters.reportPortalEnabled, true), ne(parameters.keyVaultName, '')) }}:
+      - task: AzureKeyVault@2
+        displayName: Load test-reporting secrets from Key Vault
+        inputs:
+          azureSubscription: ${{ parameters.azureSubscription }}
+          KeyVaultName: ${{ parameters.keyVaultName }}
+          SecretsFilter: report-portal-api-key
+
+  - task: Bash@3
+    displayName: Install Azure Artifacts Credential Provider
+    inputs:
+      targetType: inline
+      script: |
+        wget -qO- https://raw.githubusercontent.com/Microsoft/artifacts-credprovider/master/helpers/installcredprovider.sh | bash
+
+  - task: DotNetCoreCLI@2
+    displayName: Restore NuGet packages
+    inputs:
+      command: restore
+      projects: ${{ parameters.projectsToRestore }}
+      feedsToUse: config
+      nugetConfigPath: ${{ parameters.nugetConfigPath }}
+      includeNuGetOrg: true
+      noCache: true
+    env:
+      USE_NET6_ARTIFACTS_CREDENTIAL_PROVIDER: 'false'
+      USE_NET8_ARTIFACTS_CREDENTIAL_PROVIDER: 'true'
+      NUGET_CREDENTIALPROVIDER_SESSIONTOKENCACHE_ENABLED: 'false'
+      nugetPAT: $(System.AccessToken)
+      MSBUILDDISABLENODEREUSE: '1'
+
+  - task: DotNetCoreCLI@2
+    displayName: Build solution
+    inputs:
+      command: build
+      projects: ${{ parameters.solutionPath }}
+      arguments: --configuration Release --no-restore

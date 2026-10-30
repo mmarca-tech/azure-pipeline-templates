@@ -1,141 +1,144 @@
-# Release Pipeline Templates
+# Pipeline Templates
 
-Reusable Azure DevOps pipeline templates for managing release processes with JIRA integration and Teams notifications.
+Reusable Azure DevOps pipeline templates and supporting .NET tooling. Templates cover release management, testing, documentation publishing, and test automation — each consumed as a `repository` resource from this repo.
 
-## Repository Structure
+## Template catalog
 
-```
-release-pipeline-templates/
-├── templates/
-│   └── release-process-stages.yaml    # Main pipeline template
-└── scripts/
-    ├── create-release-ticket.ps1      # Creates JIRA release tickets
-    ├── cancel-release-ticket.ps1      # Cancels JIRA release tickets
-    ├── generate-release-notes.ps1     # Generates release notes from git history
-    ├── update-released-tickets.ps1    # Transitions implemented tickets to Done
-    └── update-stakeholders.ps1        # Sends Teams notifications
-```
+| Template | Type | Purpose | Documentation |
+|----------|------|---------|---------------|
+| `release-process-stages.yaml` | stage wrapper | Full JIRA/ITSM release workflow | [Release process](docs/release-process.md) |
+| `release-process-*.yaml` | stages | Individual release stages (ticket creation, approvals, notifications) | [Release process](docs/release-process.md) |
+| `run-unit-tests-job.yaml` | job | .NET restore, build, run unit tests, code coverage | [Run tests](docs/run-tests-jobs.md) |
+| `run-functional-tests-job.yaml` | job | .NET restore, build, run functional tests (Docker), code coverage | [Run tests](docs/run-tests-jobs.md) |
+| `publish-confluence-docs-stage.yaml` | stage | Publish Markdown docs to Confluence | [Publish Confluence docs](docs/publish-confluence-docs.md) |
+| `allure-report.yaml` | steps | Generate and upload Allure test reports | [Allure report](docs/allure-report.md) |
+| `manso-xray-implementation-stage.yaml` | stage | AI-driven Xray test implementation from commit messages | [Manso Xray](docs/manso-xray-implementation.md) |
+| `set-image-tag.yaml` | steps | Re-tag Azure Container Registry images with a stable tag | [Set image tag](docs/set-image-tag.md) |
+| `manso-pr-review-stage.yaml` | stage | Manso (`review-pull-request`) automated PR review, posted as a PR comment | [Manso PR review](docs/manso-pr-review-stage.md) |
+| `xray-upload-results-stage.yaml` | stage | Upload test results (NUnit, JUnit, Cucumber, Allure) to Xray with `xray-console-client` | [Xray upload](docs/xray-upload-results-stage.md) |
 
-## Templates
+## Getting started
 
-### release-process-stages.yaml
-
-A multi-stage pipeline template that automates the release process workflow:
-
-| Stage | Description |
-|-------|-------------|
-| `release_process_create_ticket` | Creates a JIRA release ticket with auto-generated release notes |
-| `release_process_update_stakeholders` | Sends Teams notification when ticket is created |
-| `release_process_cancel_release` | Cancels the release and notifies stakeholders |
-| `release_process_deployed_update_stakeholders` | Notifies stakeholders after successful deployment |
-
-#### Parameters
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `skipManualApproval` | boolean | `false` | Skip manual approval steps (useful for automated releases) |
-| `environment` | string | `'live'` | Target environment |
-| `jiraUrl` | string | `'https://your-domain.atlassian.net'` | JIRA instance URL |
-| `jiraUserEmail` | string | *required* | JIRA user email for authentication |
-| `jiraApiToken` | string | *required* | JIRA API token for authentication |
-| `projectKey` | string | `'CHG'` | JIRA project key |
-| `pipelineName` | string | *required* | Name of the pipeline |
-| `ticketPrefix` | string | `'CHG'` | Prefix for ticket references |
-| `componentName` | string | *required* | Name of the component being released |
-| `webhookUrl` | string | *required* | Teams webhook URL for notifications |
-| `deployedStageDependsOn` | string | `'Deploy_Live'` | Stage to depend on for deployment notification |
-| `createTicketDependsOn` | object | `[]` | Stages to depend on before creating ticket |
-| `createTicketCondition` | string | *main branch condition* | Condition for creating ticket |
-
-## Scripts
-
-### create-release-ticket.ps1
-
-Creates a JIRA release ticket with auto-generated release notes from git history.
-
-**Parameters:**
-- `-Environment` - Target environment (pt/live)
-- `-JiraUrl` - JIRA instance URL
-- `-ProjectKey` - JIRA project key
-- `-JiraUser` - JIRA username
-- `-JiraToken` - JIRA API token
-- `-PipelineName` - Pipeline name for build lookup
-- `-TicketPrefix` - Ticket reference prefix (default: "CHG")
-- `-ComponentName` - Component name (default: "Your Service Name")
-- `-IssueTypeName` - JIRA issue type name (default: "Task")
-- `-IssueLinkTypeId` - Optional JIRA issue link type ID for linking implemented tickets
-
-### cancel-release-ticket.ps1
-
-Transitions a JIRA ticket to "Cancelled" status.
-
-**Parameters:**
-- `-JiraUrl` - JIRA instance URL
-- `-JiraTicketKey` - The ticket key to cancel
-- `-JiraUser` - JIRA username
-- `-JiraToken` - JIRA API token
-
-### generate-release-notes.ps1
-
-Generates release notes by comparing git tags and extracting commit information.
-
-**Parameters:**
-- `-Env` - Target environment (pt/live)
-- `-MaxCommits` - Maximum commits to include (0 = no cap)
-- `-DebugOutput` - Enable debug logging
-
-### update-released-tickets.ps1
-
-Transitions implemented JIRA tickets to "Done" status after successful deployment.
-
-**Parameters:**
-- `-JiraUrl` - JIRA instance URL
-- `-ImplementedTickets` - Comma-separated list of ticket keys to transition
-- `-JiraUser` - JIRA username
-- `-JiraToken` - JIRA API token
-
-### update-stakeholders.ps1
-
-Sends an Adaptive Card notification to Microsoft Teams.
-
-**Parameters:**
-- `-JiraTicketKey` - The JIRA ticket key
-- `-JiraTicketUrl` - URL to the JIRA ticket
-- `-PlannedStartDate` - Planned deployment start date
-- `-PlannedEndDate` - Planned deployment end date
-- `-PackageVersion` - Version being deployed
-- `-WebhookUrl` - Teams webhook URL
-- `-action` - Action type (CREATED/UPDATED, CANCELED, DEPLOYED)
-- `-ComponentName` - Component name (default: "Your Service Name")
-
-## Usage
-
-Reference the template in your Azure DevOps pipeline:
+Reference this repository from a consuming pipeline and pin to a version tag — never use `main` in production pipelines.
 
 ```yaml
 resources:
   repositories:
-    - repository: release-pipeline-templates
+    - repository: pipeline-templates
       type: git
-      name: release-pipeline-templates
-      ref: main
+      name: pipeline-templates
+      ref: refs/tags/v3.1.0
 
 stages:
-  # Your deployment stages here...
-  
-  - template: templates/release-process-stages.yaml@release-pipeline-templates
+  - stage: Tests
+    displayName: Run Tests
+    jobs:
+      - template: templates/run-unit-tests-job.yaml@pipeline-templates
+        parameters:
+          unitTestProjects: tests/**/*.UnitTests.csproj
+
+  - template: templates/release-process-stages.yaml@pipeline-templates
     parameters:
-      environment: 'live'
-      jiraUrl: 'https://your-domain.atlassian.net'
-      jiraUserEmail: $(jira-bot-email)
-      jiraApiToken: $(jira-bot-token)
-      projectKey: 'CHG'
-      pipelineName: 'your-service-name'
-      ticketPrefix: 'CHG'
-      componentName: 'Your Service Name'
-      webhookUrl: $(release-process-webhook-url)
-      deployedStageDependsOn: 'Deploy_Live'
-      createTicketDependsOn: [ 'Get_Jira_Secrets' ]
-      createTicketCondition: "and(eq( variables['isMainBranch'], 'true' ), ne( variables['isPullRequest'],  true ))"
-      templateRepo: 'release-pipeline-templates'
+      releaseProcessEnabled: true # Set false to skip release actions without skipping deployments
+      azureSubscription: 'azureServiceConnection_Pt'
+      keyVaultName: 'example-key-vault'
+      projectKey: 'ITSM'
+      pipelineName: 'my-service'
+      affectedServices: '<customfield_15716-id>'
+      affectedComponents: '<customfield_15998-object-id>'
+      teamCMDB: '<customfield_16442-object-id>'
+      assignee: '<jira-assignee-account-id>'
+      approver: '<jira-approver-account-id>'
+      componentName: 'My Service'
 ```
+
+See [versioning](docs/versioning.md) for the full version strategy, consumer upgrade paths, and the automated tagging pipeline.
+
+## Repository structure
+
+```text
+pipeline-templates/
+├── docs/
+│   ├── release-process.md          # JIRA release workflow
+│   ├── run-tests-jobs.md           # Unit/functional test job templates
+│   ├── publish-confluence-docs.md  # Confluence publishing
+│   ├── allure-report.md            # Allure report steps
+│   ├── manso-xray-implementation.md
+│   ├── set-image-tag.md
+│   ├── manso-pr-review-stage.md
+│   ├── xray-upload-results-stage.md
+│   ├── versioning.md
+│   └── images/                     # Diagrams and screenshots
+├── templates/
+│   ├── release-process-*.yaml      # Release management stages
+│   ├── run-unit-tests-job.yaml     # Job template: unit tests
+│   ├── run-functional-tests-job.yaml # Job template: functional tests (Docker)
+│   ├── run-tests-steps.yaml        # Shared restore/build steps used by both job templates
+│   ├── publish-confluence-docs-stage.yaml
+│   ├── allure-report.yaml
+│   ├── manso-xray-implementation-stage.yaml
+│   ├── set-image-tag.yaml
+│   ├── manso-pr-review-stage.yaml
+│   └── xray-upload-results-stage.yaml
+├── scripts/
+│   ├── ReleaseProcess.cs           # Release tools launcher
+│   ├── PublishConfluenceDocs.cs    # Confluence publisher launcher
+│   ├── MansoXrayImplementation.cs  # Manso agent launcher
+│   └── VersionTag.cs               # Semantic version tagging
+├── src/
+│   ├── ReleaseTools/               # Jira, ADO, release notes, validation
+│   └── ConfluencePublisher/        # Markdown → Confluence conversion
+└── tests/
+    └── ReleaseTools.Tests/         # Unit + YAML contract tests
+```
+
+Pipeline jobs invoke the `scripts/*.cs` launchers with `dotnet run --file`. Each launcher delegates to the corresponding project under `src/`.
+
+Run release-tools tests locally with:
+
+```shell
+dotnet test tests/ReleaseTools.Tests/ReleaseTools.Tests.csproj
+```
+
+## Documentation
+
+| Topic | Guide |
+|-------|-------|
+| JIRA release management, ITSM tickets, stakeholder notifications | [docs/release-process.md](docs/release-process.md) |
+| .NET build, unit/functional tests, code coverage | [docs/run-tests-jobs.md](docs/run-tests-jobs.md) |
+| Markdown → Confluence publishing | [docs/publish-confluence-docs.md](docs/publish-confluence-docs.md) |
+| Allure report generation and upload | [docs/allure-report.md](docs/allure-report.md) |
+| Manso Xray test implementation | [docs/manso-xray-implementation.md](docs/manso-xray-implementation.md) |
+| Azure Container Registry stable image re-tagging | [docs/set-image-tag.md](docs/set-image-tag.md) |
+| Version tags, release branches, consumer pinning | [docs/versioning.md](docs/versioning.md) |
+| Manso automated PR review | [docs/manso-pr-review-stage.md](docs/manso-pr-review-stage.md) |
+| Upload test results to Xray | [docs/xray-upload-results-stage.md](docs/xray-upload-results-stage.md) |
+
+## Versioning
+
+- Pin consumers to immutable tags: `ref: refs/tags/v1.0.0`
+- Or float within a major line: `ref: refs/heads/release/v1`
+- Never point production pipelines at `main`
+
+This repository includes [azure-pipelines.version-tag.yml](azure-pipelines.version-tag.yml). On PRs it validates and runs unit tests; on `main` tests run automatically and version tagging is a **manual stage** you start when ready (so skipping a release keeps the run successful). Bumps come from `fix`/`patch`/`minor`/`major` markers in commits since the last tag. See [docs/versioning.md](docs/versioning.md).
+
+## Secrets overview
+
+Different templates read secrets from Azure Key Vault or pipeline variables:
+
+**Release process** (`keyVaultName` via `AzureKeyVault@2`):
+
+- `release-process-jira-bot-token`
+- `release-process-jira-bot-email`
+- `release-process-jira-cloud-id`
+- `release-process-webhook-url`
+
+**Manso Xray** — see the full list in [docs/manso-xray-implementation.md](docs/manso-xray-implementation.md).
+
+**Manso PR review** (`keyVaultName` via `AzureKeyVault@2`) — `manso-testing-agent-jira-url`, `manso-testing-agent-username`, `manso-testing-agent-jira-token`, `manso-testing-agent-llm-provider`, `manso-testing-agent-llm-api-key`, `manso-testing-agent-llm-model`. Uses `$(System.AccessToken)` for Azure DevOps access, not a separate PAT.
+
+**Confluence docs** — prefer vault mode: set `keyVaultName` + `azureSubscription` and the stage reads the Atlassian credential from Key Vault (defaulting to the same `manso-testing-agent-username` / `manso-testing-agent-jira-token` secrets the Manso templates use, since Jira and Confluence share one identity). Passing `confluenceEmail`/`confluenceApiToken` as pipeline variables still works but keeps a second copy of the credential per pipeline. See [docs/publish-confluence-docs.md](docs/publish-confluence-docs.md).
+
+**Run tests / ReportPortal** — configure `azureSubscription` and `keyVaultName` to use your Key Vault, where the templates read `report-portal-api-key`. Set `keyVaultName: ''` and pass `reportPortalApiKey` instead to use pipeline-variable mode. See [docs/run-tests-jobs.md](docs/run-tests-jobs.md).
+
+**Where tooling secrets live** — store tooling secrets in a Key Vault and configure each template's `azureSubscription` and `keyVaultName` parameters. Keep service runtime secrets in that service's own per-environment vault.

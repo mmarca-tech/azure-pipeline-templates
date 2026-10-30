@@ -1,0 +1,192 @@
+parameters:
+  - name: jiraUrl
+    type: string
+    default: 'https://your-domain.atlassian.net'
+  - name: templateRepo
+    type: string
+    default: 'pipeline-templates'
+  - name: dependsOn
+    type: object
+    default:
+      - Deploy_Pt
+
+stages:
+  - stage: release_process_awaiting_implementation
+    displayName: "Acknowledge Review and Wait for Go Live Approval"
+    dependsOn:
+      - ${{ if not(containsValue(parameters.dependsOn, 'release_process_create_ticket')) }}:
+        - release_process_create_ticket
+      - ${{ each dependency in parameters.dependsOn }}:
+        - ${{ dependency }}
+    condition: succeeded()
+    jobs:
+      - job: check_review_acknowledgement
+        displayName: Check Jira Review Checkpoint
+        variables:
+          jiraTicketKey: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['createTicket.JiraTicketKey']]
+          jiraBotEmail: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['sharedVars.jiraBotEmail']]
+          jiraBotToken: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['sharedVars.jiraBotToken']]
+          jiraCloudId: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['sharedVars.jiraCloudId']]
+        steps:
+          - checkout: self
+          - checkout: ${{ parameters.templateRepo }}
+          - task: UseDotNet@2
+            displayName: Use .NET 10 SDK
+            inputs:
+              packageType: 'sdk'
+              version: '10.x'
+          - task: DotNetCoreCLI@2
+            name: checkReviewAcknowledgement
+            displayName: "Check Jira Review Checkpoint"
+            inputs:
+              command: 'custom'
+              custom: 'run'
+              arguments: >
+                --file "$(Build.SourcesDirectory)/${{ parameters.templateRepo }}/scripts/ReleaseProcess.cs"
+                --
+                check-jira-review-acknowledgement
+                -JiraUrl "${{ parameters.jiraUrl }}"
+                -JiraCloudId "$(jiraCloudId)"
+                -JiraTicketKey "$(jiraTicketKey)"
+                -JiraUser "$(jiraBotEmail)"
+                -JiraToken "$(jiraBotToken)"
+      - job: wait_for_review_acknowledgement
+        displayName: Acknowledge Jira Review
+        dependsOn: check_review_acknowledgement
+        condition: and(succeeded(), eq(dependencies.check_review_acknowledgement.outputs['checkReviewAcknowledgement.reviewAcknowledgementBlocking'], 'true'))
+        pool: server
+        variables:
+          reviewAcknowledgementMessage: $[ dependencies.check_review_acknowledgement.outputs['checkReviewAcknowledgement.reviewAcknowledgementMessage'] ]
+        timeoutInMinutes: 43210
+        steps:
+          - task: ManualValidation@1
+            timeoutInMinutes: 43200
+            inputs:
+              notifyUsers: ''
+              instructions: |
+                $(reviewAcknowledgementMessage)
+
+                Complete the review in Jira and move the ticket from Review to Planning first. Resume this validation only to acknowledge that the review was completed and the ticket is in Planning.
+                The pipeline then moves the ticket to Go Live Decision. This acknowledgment does not approve Go Live; the approver must complete that decision in Jira.
+              onTimeout: 'reject'
+      - job: advance_to_go_live_decision
+        displayName: Move Jira Ticket to Go Live Decision
+        dependsOn:
+          - check_review_acknowledgement
+          - wait_for_review_acknowledgement
+        condition: and(eq(dependencies.check_review_acknowledgement.result, 'Succeeded'), in(dependencies.wait_for_review_acknowledgement.result, 'Succeeded', 'Skipped'))
+        variables:
+          jiraTicketKey: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['createTicket.JiraTicketKey']]
+          jiraBotEmail: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['sharedVars.jiraBotEmail']]
+          jiraBotToken: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['sharedVars.jiraBotToken']]
+          jiraCloudId: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['sharedVars.jiraCloudId']]
+        steps:
+          - checkout: self
+          - checkout: ${{ parameters.templateRepo }}
+          - task: UseDotNet@2
+            displayName: Use .NET 10 SDK
+            inputs:
+              packageType: 'sdk'
+              version: '10.x'
+          - task: DotNetCoreCLI@2
+            displayName: "Move Jira Ticket to Go Live Decision"
+            inputs:
+              command: 'custom'
+              custom: 'run'
+              arguments: >
+                --file "$(Build.SourcesDirectory)/${{ parameters.templateRepo }}/scripts/ReleaseProcess.cs"
+                --
+                advance-jira-to-go-live-decision
+                -JiraUrl "${{ parameters.jiraUrl }}"
+                -JiraCloudId "$(jiraCloudId)"
+                -JiraTicketKey "$(jiraTicketKey)"
+                -JiraUser "$(jiraBotEmail)"
+                -JiraToken "$(jiraBotToken)"
+      - job: check_awaiting_status
+        displayName: Check Jira Awaiting Implementation Status
+        dependsOn: advance_to_go_live_decision
+        variables:
+          jiraTicketKey: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['createTicket.JiraTicketKey']]
+          jiraBotEmail: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['sharedVars.jiraBotEmail']]
+          jiraBotToken: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['sharedVars.jiraBotToken']]
+          jiraCloudId: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['sharedVars.jiraCloudId']]
+        steps:
+          - checkout: self
+          - checkout: ${{ parameters.templateRepo }}
+          - task: UseDotNet@2
+            displayName: Use .NET 10 SDK
+            inputs:
+              packageType: 'sdk'
+              version: '10.x'
+          - task: DotNetCoreCLI@2
+            name: checkAwaitingStatus
+            displayName: "Check Jira manual release approval"
+            inputs:
+              command: 'custom'
+              custom: 'run'
+              arguments: >
+                --file "$(Build.SourcesDirectory)/${{ parameters.templateRepo }}/scripts/ReleaseProcess.cs"
+                --
+                check-jira-awaiting-implementation-status
+                -JiraUrl "${{ parameters.jiraUrl }}"
+                -JiraCloudId "$(jiraCloudId)"
+                -JiraTicketKey "$(jiraTicketKey)"
+                -JiraUser "$(jiraBotEmail)"
+                -JiraToken "$(jiraBotToken)"
+                -ExpectedStatusId "11505"
+                -ExpectedStatusName "Awaiting implementation"
+                -SetOutputVariables
+      - job: wait_for_awaiting_status
+        displayName: Wait For Jira Go Live Approval
+        dependsOn: check_awaiting_status
+        condition: and(succeeded(), eq(dependencies.check_awaiting_status.outputs['checkAwaitingStatus.awaitingStatusBlocking'], 'true'))
+        pool: server
+        variables:
+          awaitingStatusMessage: $[ dependencies.check_awaiting_status.outputs['checkAwaitingStatus.awaitingStatusMessage'] ]
+        timeoutInMinutes: 43210
+        steps:
+          - task: ManualValidation@1
+            timeoutInMinutes: 43200
+            inputs:
+              notifyUsers: ''
+              instructions: |
+                $(awaitingStatusMessage)
+
+                Complete the Go Live Decision approval in Jira. Resume this pipeline only after the ITSM ticket status is Awaiting implementation.
+              onTimeout: 'reject'
+      - job: recheck_awaiting_status
+        displayName: Re-check Jira Awaiting Implementation Status
+        dependsOn:
+          - check_awaiting_status
+          - wait_for_awaiting_status
+        condition: and(eq(dependencies.check_awaiting_status.result, 'Succeeded'), in(dependencies.wait_for_awaiting_status.result, 'Succeeded', 'Skipped'))
+        variables:
+          jiraTicketKey: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['createTicket.JiraTicketKey']]
+          jiraBotEmail: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['sharedVars.jiraBotEmail']]
+          jiraBotToken: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['sharedVars.jiraBotToken']]
+          jiraCloudId: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['sharedVars.jiraCloudId']]
+        steps:
+          - checkout: self
+          - checkout: ${{ parameters.templateRepo }}
+          - task: UseDotNet@2
+            displayName: Use .NET 10 SDK
+            inputs:
+              packageType: 'sdk'
+              version: '10.x'
+          - task: DotNetCoreCLI@2
+            displayName: "Re-check Jira Awaiting Implementation Status"
+            inputs:
+              command: 'custom'
+              custom: 'run'
+              arguments: >
+                --file "$(Build.SourcesDirectory)/${{ parameters.templateRepo }}/scripts/ReleaseProcess.cs"
+                --
+                check-jira-awaiting-implementation-status
+                -JiraUrl "${{ parameters.jiraUrl }}"
+                -JiraCloudId "$(jiraCloudId)"
+                -JiraTicketKey "$(jiraTicketKey)"
+                -JiraUser "$(jiraBotEmail)"
+                -JiraToken "$(jiraBotToken)"
+                -ExpectedStatusId "11505"
+                -ExpectedStatusName "Awaiting implementation"
+                -FailIfBlocked

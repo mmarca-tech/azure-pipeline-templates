@@ -1,0 +1,95 @@
+parameters:
+  - name: failedStageDependsOn
+    type: string
+    default: 'Deploy_Live'
+  - name: jiraUrl
+    type: string
+    default: 'https://your-domain.atlassian.net'
+  - name: templateRepo
+    type: string
+    default: 'pipeline-templates'
+  - name: componentName
+    type: string
+  - name: failedTransitionId
+    type: string
+    default: ''
+
+stages:
+  - stage: release_process_failed_update_stakeholders
+    displayName: "Update stakeholders of Failed Release"
+    dependsOn:
+      - release_process_create_ticket
+      - ${{ parameters.failedStageDependsOn }}
+    condition: and(in(dependencies.release_process_create_ticket.result, 'Succeeded', 'SucceededWithIssues'), eq(dependencies.${{ parameters.failedStageDependsOn }}.result, 'Failed'))
+    jobs:
+      - job: transition_failed_ticket
+        displayName: Transition JIRA Ticket to Failed
+        variables:
+          jiraTicketKey: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['createTicket.JiraTicketKey']]
+          jiraBotEmail: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['sharedVars.jiraBotEmail']]
+          jiraBotToken: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['sharedVars.jiraBotToken']]
+          jiraCloudId: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['sharedVars.jiraCloudId']]
+        steps:
+          - checkout: self
+          - checkout: ${{ parameters.templateRepo }}
+          - task: UseDotNet@2
+            displayName: Use .NET 10 SDK
+            inputs:
+              packageType: 'sdk'
+              version: '10.x'
+          - task: DotNetCoreCLI@2
+            displayName: "Transition JIRA Ticket"
+            inputs:
+              command: 'custom'
+              custom: 'run'
+              arguments: >
+                --file "$(Build.SourcesDirectory)/${{ parameters.templateRepo }}/scripts/ReleaseProcess.cs"
+                --
+                transition-jira-ticket
+                -JiraUrl "${{ parameters.jiraUrl }}"
+                -JiraCloudId "$(jiraCloudId)"
+                -JiraTicketKey "$(jiraTicketKey)"
+                -JiraUser "$(jiraBotEmail)"
+                -JiraToken "$(jiraBotToken)"
+                -TargetTransitionId "${{ parameters.failedTransitionId }}"
+                -TargetStatusId "14505"
+                -TargetStatusName "Failed"
+                -SetActualEndDate
+                -PostImplementationStatus "Failed via automated CI/CD deployment. Investigate, mitigate if needed, and create a new Change Request for the next attempt."
+                -Comment "Pipeline transitioned the ticket to Failed after live deployment failure and set Change completion date / Post-Implementation Status."
+      - job: update_stakeholders_failed
+        displayName: Update Stakeholders of failed release via Teams
+        dependsOn: transition_failed_ticket
+        condition: always()
+        variables:
+          jiraTicketKey: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['createTicket.JiraTicketKey']]
+          jiraTicketUrl: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['createTicket.JiraTicketUrl']]
+          plannedStartDate: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['createTicket.PlannedStartDate']]
+          plannedEndDate: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['createTicket.PlannedEndDate']]
+          releaseTag: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['createTicket.ReleaseTag']]
+          releaseProcessWebhookUrl: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['sharedVars.releaseProcessWebhookUrl']]
+        steps:
+          - checkout: self
+          - checkout: ${{ parameters.templateRepo }}
+          - task: UseDotNet@2
+            displayName: Use .NET 10 SDK
+            inputs:
+              packageType: 'sdk'
+              version: '10.x'
+          - task: DotNetCoreCLI@2
+            displayName: "Send Teams Notification"
+            inputs:
+              command: 'custom'
+              custom: 'run'
+              arguments: >
+                --file "$(Build.SourcesDirectory)/${{ parameters.templateRepo }}/scripts/ReleaseProcess.cs"
+                --
+                update-stakeholders
+                -action "FAILED"
+                -JiraTicketKey "$(jiraTicketKey)"
+                -JiraTicketUrl "$(jiraTicketUrl)"
+                -PlannedStartDate "$(plannedStartDate)"
+                -PlannedEndDate "$(plannedEndDate)"
+                -ReleaseTag "$(releaseTag)"
+                -WebhookUrl "$(releaseProcessWebhookUrl)"
+                -ComponentName "${{ parameters.componentName }}"

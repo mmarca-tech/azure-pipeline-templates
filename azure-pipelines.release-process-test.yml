@@ -1,0 +1,81 @@
+name: release-process-test-$(Date:yyyyMMdd).$(Rev:r)
+
+trigger: none
+pr: none
+
+parameters:
+  - name: releaseProcessEnabled
+    displayName: Enable release process
+    type: boolean
+    default: true
+  - name: skipManualApproval
+    displayName: Skip supported manual approval steps
+    type: boolean
+    default: false
+
+resources:
+  repositories:
+    - repository: pipeline-templates
+      type: git
+      name: your-organization/pipeline-templates
+      ref: ${{ variables['Build.SourceBranch'] }}
+
+pool:
+  name: 'example-agent-pool'
+
+stages:
+  - stage: DeployTest
+    displayName: Placeholder deploy to Test
+    jobs:
+      - job: deploy_test
+        displayName: Empty Test deployment
+        steps:
+          - checkout: none
+          - script: echo "Test deployment placeholder"
+
+  - template: templates/release-process-stages.yaml@pipeline-templates
+    parameters:
+      releaseProcessEnabled: ${{ parameters.releaseProcessEnabled }}
+      skipManualApproval: ${{ parameters.skipManualApproval }}
+      environment: 'v5'
+      jiraUrl: 'https://your-domain.atlassian.net'
+      azureSubscription: 'example-azure-service-connection'
+      keyVaultName: 'example-key-vault'
+      projectKey: 'ITSM'
+      pipelineName: 'pipeline-templates-release-process-test'
+      ticketPrefix: 'APP'
+      affectedServices: 'ari:cloud:graph::service/e3b4a816-33c4-11eb-935c-128b42819424/a32c54e8-140d-11ee-b0b2-0abe3f4a6601,ari:cloud:graph::service/e3b4a816-33c4-11eb-935c-128b42819424/b3b8b1c8-8588-11eb-8840-0abe3f4a6601,ari:cloud:graph::service/e3b4a816-33c4-11eb-935c-128b42819424/e3b4bfae-33c4-11eb-935d-128b42819424'
+      affectedComponents: '7817806'
+      teamCMDB: '7837254'
+      assignee: '63b8e950b790087ed71326e4'
+      approver: '5eeaff58b5ccf20ab39e3b34'
+      componentName: 'Pipeline Templates'
+      deployedStageDependsOn: 'DeployLive'
+      failedStageDependsOn: 'DeployLive'
+      awaitingImplementationDependsOn: [ 'DeployPT' ]
+      implementingDependsOn: []
+      createTicketDependsOn: [ 'DeployTest' ]
+      createTicketCondition: succeeded()
+      templateRepo: 'pipeline-templates'
+
+  - stage: DeployPT
+    displayName: Placeholder deploy to PT
+    dependsOn: release_process_create_ticket
+    condition: succeeded()
+    jobs:
+      - job: deploy_pt
+        displayName: Empty PT deployment
+        steps:
+          - checkout: none
+          - script: echo "PT deployment placeholder"
+
+  - stage: DeployLive
+    displayName: Placeholder deploy to Live
+    dependsOn: release_process_implementing
+    condition: succeeded()
+    jobs:
+      - job: deploy_live
+        displayName: Empty Live deployment
+        steps:
+          - checkout: none
+          - script: echo "Live deployment placeholder"

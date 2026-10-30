@@ -1,0 +1,239 @@
+parameters:
+  - name: skipManualApproval
+    type: boolean
+    default: false
+  - name: environment
+    type: string
+    default: 'live'
+  - name: azureSubscription
+    type: string
+  - name: keyVaultName
+    type: string
+  - name: jiraUrl
+    type: string
+    default: 'https://your-domain.atlassian.net'
+  - name: projectKey
+    type: string
+  - name: pipelineName
+    type: string
+  - name: ticketPrefix
+    type: string
+    default: ''
+  - name: componentName
+    type: string
+  - name: templateRepo
+    type: string
+    default: 'pipeline-templates'
+  - name: adoCollectionUri
+    type: string
+    default: ''
+  - name: adoProjectName
+    type: string
+    default: ''
+  - name: adoBuildTag
+    type: string
+    default: 'liveDeployed'
+  - name: jiraIssueType
+    type: string
+    default: '[System] Change'
+  - name: jiraPriority
+    type: string
+    default: 'Medium'
+  - name: jiraIssueLinkTypeId
+    type: string
+    default: '10633'
+  - name: affectedServices
+    type: string
+  - name: affectedComponents
+    type: string
+  - name: teamCMDB
+    type: string
+  - name: assignee
+    type: string
+  - name: approver
+    type: string
+  - name: reporter
+    type: string
+    default: ''
+  - name: changeType
+    type: string
+    default: 'Normal'
+    values:
+      - Standard
+      - Normal
+      - Major
+      - Emergency
+  - name: plannedStartDate
+    type: string
+    default: ''
+  - name: plannedEndDate
+    type: string
+    default: ''
+  - name: changeReason
+    type: string
+    default: 'Release'
+    values:
+      - Release
+      - Maintenance
+      - Upgrade
+      - Fix via SQL script
+      - 3rd Party release/maintenance
+      - Other
+  - name: changeRisk
+    type: string
+    default: 'Low'
+    values:
+      - Critical
+      - High
+      - Medium
+      - Low
+  - name: changeImpact
+    type: string
+    default: 'Minor / Localized'
+    values:
+      - Extensive / Widespread
+      - Significant / Large
+      - Moderate / Limited
+      - Minor / Localized
+  - name: serviceImpact
+    type: string
+    default: 'No significant customer-facing impact expected during the automated CI/CD deployment window. Reviewer should update if impact differs.'
+  - name: createTicketDependsOn
+    type: object
+    default: []
+  - name: createTicketCondition
+    type: string
+    default: ''
+  - name: releaseBranchCondition
+    type: string
+    default: ''
+
+stages:
+  - stage: release_process_create_ticket
+    displayName: "Create JIRA Release Ticket"
+    dependsOn:
+      - ${{ each dependency in parameters.createTicketDependsOn }}:
+        - ${{ dependency }}
+    ${{ if ne(parameters.createTicketCondition, '') }}:
+      condition: ${{ parameters.createTicketCondition }}
+    ${{ elseif ne(parameters.releaseBranchCondition, '') }}:
+      condition: and(succeeded(), ${{ parameters.releaseBranchCondition }}, ne(variables['Build.Reason'], 'PullRequest'))
+    ${{ else }}:
+      condition: and(succeeded(), eq( variables['isMainBranch'], 'true' ), ne( variables['isPullRequest'],  true ))
+    jobs:
+      - job: GetSecrets
+        displayName: Fetch Jira Secrets
+        steps:
+          - task: AzureKeyVault@2
+            displayName: Get Jira Service Account Secrets
+            inputs:
+              azureSubscription: ${{ parameters.azureSubscription }}
+              KeyVaultName: ${{ parameters.keyVaultName }}
+              SecretsFilter: 'release-process-jira-bot-token, release-process-jira-bot-email, release-process-jira-cloud-id, release-process-webhook-url'
+              RunAsPreJob: false
+          - pwsh: |
+              if ([string]::IsNullOrWhiteSpace("$(release-process-jira-cloud-id)")) {
+                Write-Error "Missing required secret 'release-process-jira-cloud-id'. JiraCloudId is mandatory."
+                exit 1
+              }
+              Write-Host "##vso[task.setvariable variable=jiraBotEmail;isOutput=true;issecret=true]$(release-process-jira-bot-email)"
+              Write-Host "##vso[task.setvariable variable=jiraBotToken;isOutput=true;issecret=true]$(release-process-jira-bot-token)"
+              Write-Host "##vso[task.setvariable variable=jiraCloudId;isOutput=true]$(release-process-jira-cloud-id)"
+              Write-Host "##vso[task.setvariable variable=releaseProcessWebhookUrl;isOutput=true;issecret=true]$(release-process-webhook-url)"
+            name: SetJiraVars
+            displayName: Export Jira secrets for later stages
+      - ${{ if eq(parameters.skipManualApproval, false) }}:
+        - job: approve_release_ticket
+          displayName: Approve JIRA Release Ticket Creation
+          dependsOn: GetSecrets
+          condition: succeeded()
+          pool: server
+          timeoutInMinutes: 43210
+          steps:
+            - task: ManualValidation@1
+              timeoutInMinutes: 43200
+              inputs:
+                notifyUsers: ''
+                instructions: 'Please approve to create the JIRA release ticket for the Live deployment. The person approving this step becomes the Jira reporter, matched by email. Queue-time parameter values are used for Change Type, Planned Start Date, Planned End Date, Change Reason, Change Risk, and Change Impact.'
+                onTimeout: 'reject'
+      - job: create_release_ticket
+        displayName: Create JIRA Release Ticket
+        dependsOn:
+          - GetSecrets
+          - ${{ if eq(parameters.skipManualApproval, false) }}:
+            - approve_release_ticket
+        condition: succeeded()
+        variables:
+          jiraBotEmail: $[dependencies.GetSecrets.outputs['SetJiraVars.jiraBotEmail']]
+          jiraBotToken: $[dependencies.GetSecrets.outputs['SetJiraVars.jiraBotToken']]
+          jiraCloudId: $[dependencies.GetSecrets.outputs['SetJiraVars.jiraCloudId']]
+          releaseProcessWebhookUrl: $[dependencies.GetSecrets.outputs['SetJiraVars.releaseProcessWebhookUrl']]
+        workspace:
+          clean: all
+        steps:
+          - checkout: self
+            path: s
+            persistCredentials: true
+            fetchDepth: 0
+            fetchTags: true
+          - checkout: ${{ parameters.templateRepo }}
+            path: s/${{ parameters.templateRepo }}
+            persistCredentials: true
+            fetchDepth: 0
+            fetchTags: true
+          - pwsh: |
+              Write-Host "##vso[task.setvariable variable=jiraBotEmail;isOutput=true;issecret=true]$(jiraBotEmail)"
+              Write-Host "##vso[task.setvariable variable=jiraBotToken;isOutput=true;issecret=true]$(jiraBotToken)"
+              Write-Host "##vso[task.setvariable variable=jiraCloudId;isOutput=true]$(jiraCloudId)"
+              Write-Host "##vso[task.setvariable variable=releaseProcessWebhookUrl;isOutput=true;issecret=true]$(releaseProcessWebhookUrl)"
+            name: sharedVars
+            displayName: Export shared release-process values
+          - task: UseDotNet@2
+            displayName: Use .NET 10 SDK
+            inputs:
+              packageType: 'sdk'
+              version: '10.x'
+          - task: DotNetCoreCLI@2
+            name: createTicket
+            displayName: "Generate Release Notes and Create JIRA Ticket"
+            env:
+              SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+            inputs:
+              command: 'custom'
+              custom: 'run'
+              arguments: >
+                --file "$(Build.SourcesDirectory)/${{ parameters.templateRepo }}/scripts/ReleaseProcess.cs"
+                --
+                create-release-ticket
+                -Environment "${{ parameters.environment }}"
+                -JiraUrl "${{ parameters.jiraUrl }}"
+                -JiraCloudId "$(jiraCloudId)"
+                -ProjectKey "${{ parameters.projectKey }}"
+                -JiraUser "$(jiraBotEmail)"
+                -JiraToken "$(jiraBotToken)"
+                -PipelineName "${{ parameters.pipelineName }}"
+                -TicketPrefix "${{ parameters.ticketPrefix }}"
+                -AffectedServices "${{ parameters.affectedServices }}"
+                -AffectedComponents "${{ parameters.affectedComponents }}"
+                -TeamCMDB "${{ parameters.teamCMDB }}"
+                -Assignee "${{ parameters.assignee }}"
+                -Approver "${{ parameters.approver }}"
+                -Reporter "${{ parameters.reporter }}"
+                -ReporterSource "${{ iif(parameters.skipManualApproval, 'Configured', 'ManualApproval') }}"
+                -ComponentName "${{ parameters.componentName }}"
+                -TemplateRepo "${{ parameters.templateRepo }}"
+                -SourceRepoName "$(Build.Repository.Name)"
+                -TargetCommit "$(Build.SourceVersion)"
+                -AdoCollectionUri "${{ parameters.adoCollectionUri }}"
+                -AdoProjectName "${{ parameters.adoProjectName }}"
+                -AdoBuildTag "${{ parameters.adoBuildTag }}"
+                -JiraIssueType "${{ parameters.jiraIssueType }}"
+                -JiraPriority "${{ parameters.jiraPriority }}"
+                -JiraIssueLinkTypeId "${{ parameters.jiraIssueLinkTypeId }}"
+                -ChangeType "${{ parameters.changeType }}"
+                -PlannedStartDate "${{ parameters.plannedStartDate }}"
+                -PlannedEndDate "${{ parameters.plannedEndDate }}"
+                -ChangeReason "${{ parameters.changeReason }}"
+                -ChangeRisk "${{ parameters.changeRisk }}"
+                -ChangeImpact "${{ parameters.changeImpact }}"
+                -ServiceImpact "${{ parameters.serviceImpact }}"

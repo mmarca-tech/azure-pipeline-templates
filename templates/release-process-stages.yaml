@@ -1,258 +1,240 @@
 parameters:
+  - name: releaseProcessEnabled
+    type: boolean
+    default: true
   - name: skipManualApproval
     type: boolean
     default: false
   - name: environment
     type: string
     default: 'live'
+  - name: azureSubscription
+    type: string
+  - name: keyVaultName
+    type: string
   - name: jiraUrl
     type: string
     default: 'https://your-domain.atlassian.net'
-  - name: jiraUserEmail
-    type: string
-  - name: jiraApiToken
-    type: string
   - name: projectKey
     type: string
-    default: 'CHG'
   - name: pipelineName
     type: string
   - name: ticketPrefix
     type: string
-    default: 'CHG'
+    default: ''
   - name: componentName
-    type: string
-  - name: webhookUrl
     type: string
   - name: templateRepo
     type: string
-    default: 'release-pipeline-templates'
+    default: 'pipeline-templates'
+  - name: adoCollectionUri
+    type: string
+    default: ''
+  - name: adoProjectName
+    type: string
+    default: ''
+  - name: adoBuildTag
+    type: string
+    default: 'liveDeployed'
+  - name: jiraIssueType
+    type: string
+    default: '[System] Change'
+  - name: jiraPriority
+    type: string
+    default: 'Medium'
+  - name: jiraIssueLinkTypeId
+    type: string
+    default: '10633'
+  - name: affectedServices
+    type: string
+  - name: affectedComponents
+    type: string
+  - name: teamCMDB
+    type: string
+  - name: assignee
+    type: string
+  - name: approver
+    type: string
+  - name: reporter
+    type: string
+    default: ''
+  - name: changeType
+    type: string
+    default: 'Normal'
+    values:
+      - Standard
+      - Normal
+      - Major
+      - Emergency
+  - name: plannedStartDate
+    type: string
+    default: ''
+  - name: plannedEndDate
+    type: string
+    default: ''
+  - name: changeReason
+    type: string
+    default: 'Release'
+    values:
+      - Release
+      - Maintenance
+      - Upgrade
+      - Fix via SQL script
+      - 3rd Party release/maintenance
+      - Other
+  - name: changeRisk
+    type: string
+    default: 'Low'
+    values:
+      - Critical
+      - High
+      - Medium
+      - Low
+  - name: changeImpact
+    type: string
+    default: 'Minor / Localized'
+    values:
+      - Extensive / Widespread
+      - Significant / Large
+      - Moderate / Limited
+      - Minor / Localized
+  - name: serviceImpact
+    type: string
+    default: 'No significant customer-facing impact expected during the automated CI/CD deployment window. Reviewer should update if impact differs.'
   - name: deployedStageDependsOn
     type: string
     default: 'Deploy_Live'
+  - name: failedStageDependsOn
+    type: string
+    default: 'Deploy_Live'
+  - name: awaitingImplementationDependsOn
+    type: object
+    default:
+      - Deploy_Pt
+  - name: implementingDependsOn
+    type: object
+    default: []
   - name: createTicketDependsOn
     type: object
     default: []
   - name: createTicketCondition
     type: string
-    default: "and(eq( variables['isMainBranch'], 'true' ), ne( variables['isPullRequest'],  true ))"
+    default: ''
+  - name: releaseBranchCondition
+    type: string
+    default: ''
+  - name: failedTransitionId
+    type: string
+    default: ''
 
 stages:
-  - stage: release_process_create_ticket
-    displayName: "Create JIRA Release Ticket"
-    dependsOn: ${{ parameters.createTicketDependsOn }}
-    condition: ${{ parameters.createTicketCondition }}
-    jobs:
-      - ${{ if eq(parameters.skipManualApproval, false) }}:
-        - job: approve_release_ticket
-          displayName: Approve JIRA Release Ticket Creation
-          pool: server
+  - ${{ if eq(parameters.releaseProcessEnabled, true) }}:
+    - template: release-process-create-ticket.yaml
+      parameters:
+        skipManualApproval: ${{ parameters.skipManualApproval }}
+        environment: ${{ parameters.environment }}
+        azureSubscription: ${{ parameters.azureSubscription }}
+        keyVaultName: ${{ parameters.keyVaultName }}
+        jiraUrl: ${{ parameters.jiraUrl }}
+        projectKey: ${{ parameters.projectKey }}
+        pipelineName: ${{ parameters.pipelineName }}
+        ticketPrefix: ${{ parameters.ticketPrefix }}
+        affectedServices: ${{ parameters.affectedServices }}
+        affectedComponents: ${{ parameters.affectedComponents }}
+        teamCMDB: ${{ parameters.teamCMDB }}
+        assignee: ${{ parameters.assignee }}
+        approver: ${{ parameters.approver }}
+        reporter: ${{ parameters.reporter }}
+        componentName: ${{ parameters.componentName }}
+        templateRepo: ${{ parameters.templateRepo }}
+        adoCollectionUri: ${{ parameters.adoCollectionUri }}
+        adoProjectName: ${{ parameters.adoProjectName }}
+        adoBuildTag: ${{ parameters.adoBuildTag }}
+        jiraIssueType: ${{ parameters.jiraIssueType }}
+        jiraPriority: ${{ parameters.jiraPriority }}
+        jiraIssueLinkTypeId: ${{ parameters.jiraIssueLinkTypeId }}
+        changeType: ${{ parameters.changeType }}
+        plannedStartDate: ${{ parameters.plannedStartDate }}
+        plannedEndDate: ${{ parameters.plannedEndDate }}
+        changeReason: ${{ parameters.changeReason }}
+        changeRisk: ${{ parameters.changeRisk }}
+        changeImpact: ${{ parameters.changeImpact }}
+        serviceImpact: ${{ parameters.serviceImpact }}
+        createTicketDependsOn: ${{ parameters.createTicketDependsOn }}
+        createTicketCondition: ${{ parameters.createTicketCondition }}
+        releaseBranchCondition: ${{ parameters.releaseBranchCondition }}
+
+    - template: release-process-cancel-release.yaml
+      parameters:
+        jiraUrl: ${{ parameters.jiraUrl }}
+        componentName: ${{ parameters.componentName }}
+        templateRepo: ${{ parameters.templateRepo }}
+
+    - template: release-process-update-stakeholders.yaml
+      parameters:
+        skipManualApproval: ${{ parameters.skipManualApproval }}
+        componentName: ${{ parameters.componentName }}
+        templateRepo: ${{ parameters.templateRepo }}
+
+    - template: release-process-awaiting-implementation.yaml
+      parameters:
+        jiraUrl: ${{ parameters.jiraUrl }}
+        templateRepo: ${{ parameters.templateRepo }}
+        dependsOn: ${{ parameters.awaitingImplementationDependsOn }}
+
+    - template: release-process-implementing.yaml
+      parameters:
+        jiraUrl: ${{ parameters.jiraUrl }}
+        templateRepo: ${{ parameters.templateRepo }}
+        dependsOn: ${{ parameters.implementingDependsOn }}
+
+    - template: release-process-release-deployed.yaml
+      parameters:
+        deployedStageDependsOn: ${{ parameters.deployedStageDependsOn }}
+        jiraUrl: ${{ parameters.jiraUrl }}
+        componentName: ${{ parameters.componentName }}
+        templateRepo: ${{ parameters.templateRepo }}
+
+    - template: release-process-release-failed.yaml
+      parameters:
+        failedStageDependsOn: ${{ parameters.failedStageDependsOn }}
+        jiraUrl: ${{ parameters.jiraUrl }}
+        componentName: ${{ parameters.componentName }}
+        templateRepo: ${{ parameters.templateRepo }}
+        failedTransitionId: ${{ parameters.failedTransitionId }}
+
+  - ${{ else }}:
+    # Keep the public hand-off stage names successful so deployments that depend
+    # on the release process continue through each environment when it is disabled.
+    - stage: release_process_create_ticket
+      displayName: "Release process disabled before PT"
+      dependsOn:
+        - ${{ each dependency in parameters.createTicketDependsOn }}:
+          - ${{ dependency }}
+      condition: succeeded()
+      jobs:
+        - job: release_process_disabled_before_pt
+          displayName: Release process disabled
           steps:
-            - task: ManualValidation@1
-              inputs:
-                notifyUsers: ''
-                instructions: 'Please approve to create the JIRA release ticket for the Live deployment.'
-                onTimeout: 'reject'
-                timeoutInMinutes: 8640  # 6 days timeout
-      - job: create_release_ticket
-        displayName: Create JIRA Release Ticket
-        ${{ if eq(parameters.skipManualApproval, false) }}:
-          dependsOn: approve_release_ticket
-        condition: succeeded()
-        workspace:
-          clean: all
-        steps:
-          - checkout: self
-          - checkout: ${{ parameters.templateRepo }}
-          - task: PowerShell@2
-            name: createTicket
-            displayName: "Generate Release Notes and Create JIRA Ticket"
-            env:
-              SYSTEM_ACCESSTOKEN: $(System.AccessToken)
-            inputs:
-              targetType: 'filePath'
-              pwsh: true
-              filePath: '$(Build.SourcesDirectory)/${{ parameters.templateRepo }}/scripts/create-release-ticket.ps1'
-              arguments: >
-                -Environment "${{ parameters.environment }}"
-                -JiraUrl "${{ parameters.jiraUrl }}"
-                -ProjectKey "${{ parameters.projectKey }}"
-                -JiraUser "${{ parameters.jiraUserEmail }}"
-                -JiraToken "${{ parameters.jiraApiToken }}"
-                -PipelineName "${{ parameters.pipelineName }}"
-                -TicketPrefix "${{ parameters.ticketPrefix }}"
-                -ComponentName "${{ parameters.componentName }}"
-                -SourceRepoName "$(Build.Repository.Name)"
+            - checkout: none
+            - script: echo "Release process is disabled; continuing deployment."
+              displayName: Continue deployment without release actions
 
-  - stage: release_process_update_stakeholders
-    displayName: "Update Stakeholders"
-    dependsOn: [release_process_create_ticket]
-    condition: succeeded()
-    jobs:
-      - ${{ if eq(parameters.skipManualApproval, false) }}:
-        - job: approve_update_stakeholders
-          displayName: Approve Stakeholder Notification
-          pool: server
+    - stage: release_process_implementing
+      displayName: "Release process disabled before Live"
+      dependsOn:
+        - release_process_create_ticket
+        - ${{ each dependency in parameters.awaitingImplementationDependsOn }}:
+          - ${{ if ne(dependency, 'release_process_create_ticket') }}:
+            - ${{ dependency }}
+        - ${{ each dependency in parameters.implementingDependsOn }}:
+          - ${{ if and(ne(dependency, 'release_process_create_ticket'), not(containsValue(parameters.awaitingImplementationDependsOn, dependency))) }}:
+            - ${{ dependency }}
+      condition: succeeded()
+      jobs:
+        - job: release_process_disabled_before_live
+          displayName: Release process disabled
           steps:
-            - task: ManualValidation@1
-              inputs:
-                notifyUsers: ''
-                instructions: 'Please approve to update the stakeholders for the Live deployment.'
-                onTimeout: 'reject'
-                timeoutInMinutes: 8640  # 6 days timeout
-      - job: update_stakeholders
-        displayName: Update Stakeholders via Teams
-        ${{ if eq(parameters.skipManualApproval, false) }}:
-          dependsOn: approve_update_stakeholders
-        condition: succeeded()
-        variables:
-          jiraTicketKey: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['createTicket.JiraTicketKey']]
-          jiraTicketUrl: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['createTicket.JiraTicketUrl']]
-          plannedStartDate: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['createTicket.PlannedStartDate']]
-          plannedEndDate: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['createTicket.PlannedEndDate']]
-        steps:
-          - checkout: self
-          - checkout: ${{ parameters.templateRepo }}
-          - task: PowerShell@2
-            displayName: "Send Teams Notification"
-            inputs:
-              targetType: 'filePath'
-              pwsh: true
-              filePath: '$(Build.SourcesDirectory)/${{ parameters.templateRepo }}/scripts/update-stakeholders.ps1'
-              arguments: >
-                -action "CREATED/UPDATED"
-                -JiraTicketKey "$(jiraTicketKey)"
-                -JiraTicketUrl "$(jiraTicketUrl)"
-                -PlannedStartDate "$(plannedStartDate)"
-                -PlannedEndDate "$(plannedEndDate)"
-                -PackageVersion "$(packageVersion)"
-                -WebhookUrl "${{ parameters.webhookUrl }}"
-                -ComponentName "${{ parameters.componentName }}"
-
-  - stage: release_process_cancel_release
-    displayName: "Cancel Release"
-    dependsOn: [release_process_create_ticket]
-    condition: succeeded()
-    jobs:
-      - job: approve_cancel_release
-        displayName: Approve Cancel Release
-        pool: server
-        steps:
-          - task: ManualValidation@1
-            inputs:
-              notifyUsers: ''
-              instructions: 'Please approve to cancel the release for the Live deployment.'
-              onTimeout: 'reject'
-              timeoutInMinutes: 8640  # 6 days timeout
-      - job: cancel_release_ticket
-        displayName: Cancel JIRA Release Ticket
-        dependsOn: approve_cancel_release
-        condition: succeeded()
-        variables:
-          jiraTicketKey: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['createTicket.JiraTicketKey']]
-        steps:
-          - checkout: self
-          - checkout: ${{ parameters.templateRepo }}
-          - task: PowerShell@2
-            displayName: "Cancel JIRA Ticket"
-            inputs:
-              targetType: 'filePath'
-              pwsh: true
-              filePath: '$(Build.SourcesDirectory)/${{ parameters.templateRepo }}/scripts/cancel-release-ticket.ps1'
-              arguments: >
-                -JiraUrl "${{ parameters.jiraUrl }}"
-                -JiraTicketKey "$(jiraTicketKey)"
-                -JiraUser "${{ parameters.jiraUserEmail }}"
-                -JiraToken "${{ parameters.jiraApiToken }}"
-      - job: update_stakeholders_cancel
-        displayName: Update Stakeholders of canceled release via Teams
-        dependsOn: cancel_release_ticket
-        condition: succeeded()
-        variables:
-          jiraTicketKey: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['createTicket.JiraTicketKey']]
-          jiraTicketUrl: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['createTicket.JiraTicketUrl']]
-          plannedStartDate: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['createTicket.PlannedStartDate']]
-          plannedEndDate: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['createTicket.PlannedEndDate']]
-        steps:
-          - checkout: self
-          - checkout: ${{ parameters.templateRepo }}
-          - task: PowerShell@2
-            displayName: "Send Teams Notification"
-            inputs:
-              targetType: 'filePath'
-              pwsh: true
-              filePath: '$(Build.SourcesDirectory)/${{ parameters.templateRepo }}/scripts/update-stakeholders.ps1'
-              arguments: >
-                -action "CANCELED"
-                -JiraTicketKey "$(jiraTicketKey)"
-                -JiraTicketUrl "$(jiraTicketUrl)"
-                -PlannedStartDate "$(plannedStartDate)"
-                -PlannedEndDate "$(plannedEndDate)"
-                -PackageVersion "$(packageVersion)"
-                -WebhookUrl "${{ parameters.webhookUrl }}"
-                -ComponentName "${{ parameters.componentName }}"
-
-  - stage: release_process_deployed_update_stakeholders
-    displayName: "Update stakeholders of Deployed Release"
-    dependsOn:
-      - ${{ parameters.deployedStageDependsOn }}
-    condition: succeeded()
-    jobs:
-      - job: approve_update_released
-        displayName: Approve Update of Deployed Release
-        pool: server
-        steps:
-          - task: ManualValidation@1
-            inputs:
-              notifyUsers: ''
-              instructions: 'Please approve to update the stakeholders for the deployed Live release.'
-              onTimeout: 'reject'
-              timeoutInMinutes: 8640  # 6 days timeout
-      - job: update_released_ticket
-        displayName: Update Released JIRA Tickets
-        dependsOn: approve_update_released
-        condition: succeeded()
-        variables:
-          jiraTicketKey: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['createTicket.JiraTicketKey']]
-          implementsIssues: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['createTicket.ImplementsIssues']]
-        steps:
-          - checkout: self
-          - checkout: ${{ parameters.templateRepo }}
-          - task: PowerShell@2
-            displayName: "Update Released JIRA Tickets"
-            inputs:
-              targetType: 'filePath'
-              pwsh: true
-              filePath: '$(Build.SourcesDirectory)/${{ parameters.templateRepo }}/scripts/update-released-tickets.ps1'
-              arguments: >
-                -JiraUrl "${{ parameters.jiraUrl }}"
-                -ImplementedTickets "$(implementsIssues)"
-                -JiraTicketKey "$(jiraTicketKey)"
-                -JiraUser "${{ parameters.jiraUserEmail }}"
-                -JiraToken "${{ parameters.jiraApiToken }}"
-      - job: update_stakeholders_deployed
-        displayName: Update Stakeholders of deployed release via Teams
-        condition: succeeded()
-        variables:
-          jiraTicketKey: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['createTicket.JiraTicketKey']]
-          jiraTicketUrl: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['createTicket.JiraTicketUrl']]
-          plannedStartDate: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['createTicket.PlannedStartDate']]
-          plannedEndDate: $[stageDependencies.release_process_create_ticket.create_release_ticket.outputs['createTicket.PlannedEndDate']]
-        steps:
-          - checkout: self
-          - checkout: ${{ parameters.templateRepo }}
-          - task: PowerShell@2
-            displayName: "Send Teams Notification"
-            inputs:
-              targetType: 'filePath'
-              pwsh: true
-              filePath: '$(Build.SourcesDirectory)/${{ parameters.templateRepo }}/scripts/update-stakeholders.ps1'
-              arguments: >
-                -action "DEPLOYED"
-                -JiraTicketKey "$(jiraTicketKey)"
-                -JiraTicketUrl "$(jiraTicketUrl)"
-                -PlannedStartDate "$(plannedStartDate)"
-                -PlannedEndDate "$(plannedEndDate)"
-                -PackageVersion "$(packageVersion)"
-                -WebhookUrl "${{ parameters.webhookUrl }}"
-                -ComponentName "${{ parameters.componentName }}"
+            - checkout: none
+            - script: echo "Release process is disabled; continuing deployment."
+              displayName: Continue deployment without release actions

@@ -1,0 +1,96 @@
+parameters:
+  - name: dotnetSdkVersion
+    type: string
+    default: 10.0.x
+  - name: projectsToRestore
+    type: string
+    default: src/**/*.csproj
+  - name: nugetConfigPath
+    type: string
+    default: src/nuget.config
+  - name: solutionPath
+    type: string
+    default: src/*.sln
+  - name: unitTestProjects
+    type: string
+  # Set to false to skip ReportPortal reporting for this job entirely (no
+  # AzureKeyVault@2 task, no REPORTPORTAL_* env vars set on the test step).
+  - name: reportPortalEnabled
+    type: boolean
+    default: true
+  # ReportPortal reads from the shared example-key-vault vault by default - this is
+  # the standard location for this org's pipeline tooling secrets (see README.md,
+  # "Where tooling secrets live"). Pass keyVaultName: '' plus reportPortalApiKey to
+  # use a pipeline variable instead.
+  - name: azureSubscription
+    type: string
+    default: example-azure-service-connection
+  - name: keyVaultName
+    type: string
+    default: example-key-vault
+  # Only used when keyVaultName is set to ''.
+  - name: reportPortalApiKey
+    type: string
+    default: ''
+  - name: coverletSettingsPath
+    type: string
+    default: ''
+
+jobs:
+  - job: UnitTests
+    displayName: Unit Tests
+    pool:
+      name: example-agent-pool
+    steps:
+      - template: run-tests-steps.yaml
+        parameters:
+          dotnetSdkVersion: ${{ parameters.dotnetSdkVersion }}
+          reportPortalEnabled: ${{ parameters.reportPortalEnabled }}
+          azureSubscription: ${{ parameters.azureSubscription }}
+          keyVaultName: ${{ parameters.keyVaultName }}
+          projectsToRestore: ${{ parameters.projectsToRestore }}
+          nugetConfigPath: ${{ parameters.nugetConfigPath }}
+          solutionPath: ${{ parameters.solutionPath }}
+
+      - task: DotNetCoreCLI@2
+        displayName: Run Unit Tests
+        inputs:
+          command: test
+          projects: ${{ parameters.unitTestProjects }}
+          ${{ if ne(parameters.coverletSettingsPath, '') }}:
+            arguments: >
+              --configuration Release
+              --no-restore
+              --logger "trx"
+              --logger "console;verbosity=detailed"
+              --logger "ReportPortal"
+              --collect:"XPlat Code Coverage"
+              --settings ${{ parameters.coverletSettingsPath }}
+          ${{ if eq(parameters.coverletSettingsPath, '') }}:
+            arguments: >
+              --configuration Release
+              --no-restore
+              --logger "trx"
+              --logger "console;verbosity=detailed"
+              --logger "ReportPortal"
+              --collect:"XPlat Code Coverage"
+          publishTestResults: true
+          testResultsFormat: VSTest
+          testResultsFiles: $(Agent.TempDirectory)/**/*.trx
+        env:
+          ${{ if eq(parameters.reportPortalEnabled, true) }}:
+            REPORTPORTAL_ENABLED: 'true'
+            ${{ if ne(parameters.keyVaultName, '') }}:
+              REPORTPORTAL_SERVER_APIKEY: $(report-portal-api-key)
+            ${{ if eq(parameters.keyVaultName, '') }}:
+              REPORTPORTAL_SERVER_APIKEY: ${{ parameters.reportPortalApiKey }}
+          ${{ if eq(parameters.reportPortalEnabled, false) }}:
+            REPORTPORTAL_ENABLED: 'false'
+
+      - task: PublishCodeCoverageResults@2
+        displayName: Publish Code Coverage
+        condition: succeededOrFailed()
+        inputs:
+          codeCoverageTool: Cobertura
+          summaryFileLocation: $(Agent.TempDirectory)/**/coverage.cobertura.xml
+          pathToSources: $(Build.SourcesDirectory)
