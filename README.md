@@ -82,17 +82,15 @@ pipeline-templates/
 │   └── xray-upload-results-stage.yaml
 ├── scripts/
 │   ├── ReleaseProcess.cs           # Release tools launcher
-│   ├── PublishConfluenceDocs.cs    # Confluence publisher launcher
 │   ├── MansoXrayImplementation.cs  # Manso agent launcher
 │   └── VersionTag.cs               # Semantic version tagging
 ├── src/
-│   ├── ReleaseTools/               # Jira, ADO, release notes, validation
-│   └── ConfluencePublisher/        # Markdown → Confluence conversion
+│   └── ReleaseTools/               # Jira, ADO, release notes, validation
 └── tests/
     └── ReleaseTools.Tests/         # Unit + YAML contract tests
 ```
 
-Pipeline jobs invoke the `scripts/*.cs` launchers with `dotnet run --file`. Each launcher delegates to the corresponding project under `src/`.
+Pipeline jobs invoke the `scripts/*.cs` launchers with `dotnet run --file`. The Confluence publishing implementation lives in the separate `confluence-publisher` repository; this repository keeps its Azure Pipelines stage template.
 
 Run release-tools tests locally with:
 

@@ -1,6 +1,5 @@
 <Solution>
   <Folder Name="/src/">
-    <Project Path="src/ConfluencePublisher/ConfluencePublisher.csproj" />
     <Project Path="src/ReleaseTools/ReleaseTools.csproj" />
   </Folder>
   <Folder Name="/tests/">

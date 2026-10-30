@@ -4,15 +4,16 @@ Stage template that publishes Markdown documentation from a consuming repository
 
 **Template:** `templates/publish-confluence-docs-stage.yaml`
 
-**Implementation:** `scripts/PublishConfluenceDocs.cs` (launcher) and `src/PipelineTools.ConfluencePublisher`
+**Implementation:** the `confluence-publisher` repository publishes a Linux x64 package as a GitHub Release asset. This repository keeps the Azure Pipelines stage template, which downloads and runs that package.
 
 ## What it does
 
 1. Checks out the consuming repository and this template repository
-2. Discovers all `*.md` files under the configured docs root
-3. Groups files by first-level subfolder under the docs root
-4. Converts Markdown to Confluence storage format (tables, links, code blocks, images)
-5. Creates or updates Confluence pages under the parent page
+2. Downloads the configured publisher version from its GitHub Release
+3. Discovers all `*.md` files under the configured docs root
+4. Groups files by first-level subfolder under the docs root
+5. Converts Markdown to Confluence storage format (tables, links, code blocks, images)
+6. Creates or updates Confluence pages under the parent page
 
 ## Parameters
 
@@ -25,6 +26,7 @@ Stage template that publishes Markdown documentation from a consuming repository
 | `poolName` | string | `example-agent-pool` | Agent pool name |
 | `dotnetSdkVersion` | string | `10.0.x` | .NET SDK version |
 | `templateRepo` | string | `pipeline-templates` | Checked-out template repository folder name |
+| `publisherVersion` | string | `v1.0.0` | GitHub Release tag for the publisher package |
 | `docsPath` | string | `src/docs` | Repository-relative path to the Markdown docs root |
 | `confluenceBaseUrl` | string | `https://your-domain.atlassian.net/wiki` | Confluence base URL |
 | `confluenceSpaceKey` | string | `RFCCT` | Confluence space key |
@@ -74,6 +76,7 @@ stages:
       condition: succeeded('Build')
       docsPath: src/docs
       parentPageId: '123456789'
+      publisherVersion: v1.0.0
       confluenceEmail: $(confluenceEmail)
       confluenceApiToken: $(confluenceApiToken)
       confluenceSpaceKey: RFCCT
@@ -98,7 +101,7 @@ Each Markdown file's first `# Heading` becomes the Confluence page title. If no 
 
 ## Environment variables
 
-The template sets these for `PublishConfluenceDocs.cs`:
+The template sets these environment variables for the packaged `ConfluencePublisher` executable:
 
 | Variable | Source |
 |----------|--------|
@@ -114,6 +117,7 @@ The template sets these for `PublishConfluenceDocs.cs`:
 
 ## Notes
 
+- The publisher release asset targets Linux x64. Set `poolName` to a Linux x64 agent pool.
 - Store Confluence credentials as pipeline secrets or variable group values rather than hard-coding them in YAML.
 - Use `dryRun: true` to validate Markdown conversion without updating Confluence pages.
 - SVG and PNG images referenced from Markdown are converted for Confluence display.
