@@ -81,21 +81,18 @@ pipeline-templates/
 │   ├── manso-pr-review-stage.yaml
 │   └── xray-upload-results-stage.yaml
 ├── scripts/
-│   ├── ReleaseProcess.cs           # Release tools launcher
-│   ├── MansoXrayImplementation.cs  # Manso agent launcher
-│   └── VersionTag.cs               # Semantic version tagging
-├── src/
-│   └── ReleaseTools/               # Jira, ADO, release notes, validation
+│   ├── ReleaseProcess.cs           # Launcher for the packaged release tools
+│   └── MansoXrayImplementation.cs  # Manso agent launcher
 └── tests/
-    └── ReleaseTools.Tests/         # Unit + YAML contract tests
+    └── PipelineTemplates.Tests/   # YAML contract tests
 ```
 
-Pipeline jobs invoke the `scripts/*.cs` launchers with `dotnet run --file`. The Confluence publishing implementation lives in the separate `confluence-publisher` repository; this repository keeps its Azure Pipelines stage template.
+Pipeline jobs invoke the `scripts/*.cs` launchers with `dotnet run --file`. Release management implementation and unit tests live in the separate `release-management-tools` repository; its versioned Linux package is downloaded by the ReleaseProcess launcher. The Confluence publishing implementation lives in the separate `confluence-publisher` repository; this repository keeps its Azure Pipelines stage template.
 
-Run release-tools tests locally with:
+Run pipeline template contract tests locally with:
 
 ```shell
-dotnet test tests/ReleaseTools.Tests/ReleaseTools.Tests.csproj
+dotnet test tests/PipelineTemplates.Tests/PipelineTemplates.Tests.csproj
 ```
 
 ## Documentation

@@ -237,25 +237,17 @@ public class ReleaseProcessContractTests
     }
 
     [Fact]
-    public void Release_process_templates_reference_existing_ReleaseProcess_script()
+    public void Release_process_templates_reference_existing_ReleaseTools_launcher()
     {
         var templatesDir = Path.Combine(RepoRoot, "templates");
         var releaseTemplates = Directory.GetFiles(templatesDir, "release-process-*.yaml");
         Assert.NotEmpty(releaseTemplates);
 
-        var scriptPath = Path.Combine(RepoRoot, "scripts", "ReleaseProcess.cs");
-        Assert.True(File.Exists(scriptPath));
-
-        foreach (var template in releaseTemplates)
-        {
-            var content = File.ReadAllText(template);
-            foreach (Match match in Regex.Matches(content, @"scripts/(?<name>[^'""\s)]+\.cs)"))
-            {
-                var relative = match.Groups["name"].Value.Replace('/', Path.DirectorySeparatorChar);
-                var full = Path.Combine(RepoRoot, "scripts", relative);
-                Assert.True(File.Exists(full), $"Missing script referenced by {Path.GetFileName(template)}: scripts/{match.Groups["name"].Value}");
-            }
-        }
+        var launcherPath = Path.Combine(RepoRoot, "scripts", "ReleaseProcess.cs");
+        Assert.True(File.Exists(launcherPath));
+        Assert.Contains(
+            releaseTemplates,
+            template => File.ReadAllText(template).Contains("scripts/ReleaseProcess.cs", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -276,7 +268,7 @@ public class ReleaseProcessContractTests
         while (dir is not null)
         {
             if (Directory.Exists(Path.Combine(dir.FullName, "templates")) &&
-                Directory.Exists(Path.Combine(dir.FullName, "src")))
+                Directory.Exists(Path.Combine(dir.FullName, "tests", "PipelineTemplates.Tests")))
             {
                 return dir.FullName;
             }

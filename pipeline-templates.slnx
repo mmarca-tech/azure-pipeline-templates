@@ -1,8 +1,5 @@
 <Solution>
-  <Folder Name="/src/">
-    <Project Path="src/ReleaseTools/ReleaseTools.csproj" />
-  </Folder>
   <Folder Name="/tests/">
-    <Project Path="tests/ReleaseTools.Tests/ReleaseTools.Tests.csproj" />
+    <Project Path="tests/PipelineTemplates.Tests/PipelineTemplates.Tests.csproj" />
   </Folder>
 </Solution>

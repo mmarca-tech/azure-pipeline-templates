@@ -112,7 +112,7 @@ This repo includes [azure-pipelines.version-tag.yml](../azure-pipelines.version-
 ### Pull requests targeting `main`
 
 1. Validate scripts/YAML references.
-2. Run `tests/PipelineTools.ReleaseTools.Tests`.
+2. Run `tests/PipelineTemplates.Tests/PipelineTemplates.Tests.csproj`.
 
 No version tag is created on PRs.
 
