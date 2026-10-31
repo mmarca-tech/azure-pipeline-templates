@@ -11,7 +11,7 @@ Stage template that runs the Manso testing agent to generate or implement Xray a
 1. Optionally detects whether changed files match configured path filters
 2. Checks out the exact source commit with credentials for branch push
 3. Loads Manso agent secrets from Azure Key Vault
-4. Authenticates to Azure Artifacts NuGet and npm feeds
+4. Authenticates to the required Azure Artifacts NuGet feed and GitHub Packages npm registry
 5. Extracts the first Jira key from the commit message
 6. Runs `manso-testing-agent` to implement Xray tests
 7. Publishes the agent output as a pipeline artifact
@@ -36,7 +36,7 @@ When `runOnlyWhenChangedPaths` is set, a preceding detection stage compares chan
 | `keyVaultSecretsFilter` | string | *(long default list)* | Comma-separated secret names to load |
 | `nodeVersion` | string | `20.x` | Node.js version |
 | `dotnetSdkVersion` | string | `10.x` | .NET SDK version |
-| `packageSpec` | string | `manso-testing-agent@2.6.0` | npm package spec for the agent |
+| `packageSpec` | string | `@mmarca-tech/manso-testing-agent@0.1.4` | Scoped GitHub npm package spec for the agent |
 | `memoryRoot` | string | manso-memory-cabin repo URL | Manso memory cabin repository |
 | `memoryEnabled` | string | `'true'` | Enable Manso memory cabin |
 | `memoryCacheDir` | string | agent temp dir | Local cache directory for memory cabin |
@@ -44,7 +44,7 @@ When `runOnlyWhenChangedPaths` is set, a preceding detection stage compares chan
 | `memoryStrict` | string | `'false'` | Strict memory cabin mode |
 | `repositoryName` | string | `''` | Repository name passed to the agent |
 | `targetBranch` | string | `main` | Branch the agent targets for PR creation |
-| `npmrcPath` | string | `.manso/agent-package/.npmrc` | Repository-relative npm auth file |
+| `npmUserConfig` | string | agent temp path | Temporary GitHub Packages npm config |
 | `outputDirectory` | string | pipeline workspace path | Agent output directory |
 | `healAttempts` | number | `4` | Number of heal/retry attempts |
 | `testDesignEnabled` | boolean | `true` | Enable test design in the agent |
@@ -83,7 +83,8 @@ stages:
 
 The target repository must provide:
 
-- `.manso/agent-package/.npmrc` for Azure Artifacts npm authentication
+- A GitHub PAT classic with `read:packages` stored in Key Vault as `github-packages-token`
+- No consumer-repo npm config is needed; the stage creates a temporary scoped config and passes the token as `NODE_AUTH_TOKEN`
 - Manso guidance files such as `.manso/testgen.md` and `.manso/repo-conventions.json`
 - Commit messages that include a Jira ticket key (for example `PROJ-123 Add endpoint validation`)
 
@@ -103,6 +104,7 @@ The default `keyVaultSecretsFilter` loads these secrets:
 - `manso-testing-agent-otel-*` (OpenTelemetry settings)
 - `manso-testing-agent-xray-*` (Xray Cloud credentials and link settings)
 - `manso-testing-agent-enable-confluence`
+- `github-packages-token` (GitHub PAT classic with `read:packages`)
 - `manso-testing-agent-openinference-hide-inputs`
 - `manso-testing-agent-openinference-hide-outputs`
 

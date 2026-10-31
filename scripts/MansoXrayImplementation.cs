@@ -43,7 +43,7 @@ static class MansoXrayImplementationProgram
         var commitSha = options.Required("commit-sha");
         var repositoryDirectory = Path.GetFullPath(options.Required("repository-directory"));
         var outputDirectory = Path.GetFullPath(options.Required("out"));
-        var packageSpec = options.Get("package-spec", "manso-testing-agent@2.6.0")!;
+        var packageSpec = options.Get("package-spec", "@mmarca-tech/manso-testing-agent@0.1.4")!;
         var workDirectory = Path.GetFullPath(options.Get(
             "work-directory",
             Path.Combine(GetAgentTempDirectory(), "manso-testing-agent-implementation"))!);
@@ -628,7 +628,7 @@ static class MansoXrayImplementationProgram
           dotnet run --file scripts/MansoXrayImplementation.cs -- --commit-sha <sha> --repository-directory <path> --out <path> [options]
 
         Options:
-          --package-spec <npm package>              Default: manso-testing-agent@2.6.0
+          --package-spec <npm package>              Default: @mmarca-tech/manso-testing-agent@0.1.4
           --work-directory <path>                   Default: $(Agent.TempDirectory)/manso-testing-agent-implementation
           --npm-user-config <path>                  Authenticated npmrc path
           --repository-name <name>                  Name used in generated commit/PR text

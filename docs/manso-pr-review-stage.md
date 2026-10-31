@@ -8,11 +8,10 @@ This replaces an earlier, incorrect version of this template that wrapped the Gi
 
 ## What it does
 
-1. Installs Node.js and authenticates the Azure Artifacts npm feed that hosts `manso-testing-agent`
-2. Loads the shared Manso secrets (Jira, LLM provider/key/model) from the configured Key Vault
-3. Installs `manso-testing-agent` into a temp directory (not the repo) and runs `review-pull-request`
-4. The CLI auto-detects the current PR from Azure DevOps predefined variables, detects a linked Jira ticket from the branch/commit, reviews the diff against the ticket, and posts a structured comment (recommendation, findings by severity, business + technical review) unless `--no-comment` is set
-5. Publishes the review's JSON/Markdown output as a build artifact
+1. Installs Node.js and loads the shared Manso secrets, including the GitHub Packages read token, from Key Vault
+2. Writes a temporary GitHub-scoped npm config and installs the pinned Manso package into a temp directory
+3. Runs `review-pull-request` and publishes its JSON/Markdown output
+4. The CLI auto-detects the current PR from Azure DevOps predefined variables, detects a linked Jira ticket from the branch/commit, reviews the diff against the ticket, and posts a structured comment unless `--no-comment` is set
 
 ## Parameters
 
@@ -26,14 +25,13 @@ This replaces an earlier, incorrect version of this template that wrapped the Gi
 | `condition` | string | `succeeded()` | Stage condition |
 | `poolName` | string | `example-agent-pool` | Agent pool name |
 | `nodeVersion` | string | `20.x` | Node.js version |
-| `packageSpec` | string | `manso-testing-agent@2.6.0` | npm package/version to install |
-| `npmrcPath` | string | `.manso/agent-package/.npmrc` | Path (in the consumer repo) to the npm feed config |
-| `npmUserConfig` | string | `$(Agent.TempDirectory)/manso-pr-review.npmrc` | Working copy of the npmrc that gets authenticated |
+| `packageSpec` | string | `@mmarca-tech/manso-testing-agent@0.1.4` | Scoped GitHub Packages package/version to install |
+| `npmUserConfig` | string | `$(Agent.TempDirectory)/manso-pr-review.npmrc` | Temporary GitHub Packages config created by the stage |
 | `installDirectory` | string | `$(Agent.TempDirectory)/manso-pr-review-install` | Where `manso-testing-agent` gets installed |
 | `outputDirectory` | string | `$(Agent.TempDirectory)/manso-pr-review-output` | Where the review JSON/Markdown output is written |
 | `azureSubscription` | string | *(required)* | Service connection for Key Vault access |
 | `keyVaultName` | string | *(required)* | Key Vault holding the Manso secrets |
-| `keyVaultSecretsFilter` | string | Jira URL/username/token + LLM provider/key/model | Secrets to fetch |
+| `keyVaultSecretsFilter` | string | Jira URL/username/token + LLM provider/key/model + GitHub package token | Secrets to fetch |
 | `noComment` | boolean | `false` | Run the review without posting a PR comment (useful for a dry run) |
 
 ## Usage
@@ -59,10 +57,9 @@ stages:
 
 Per `docs/operations/consumer-repository-setup.md` in the `manso-testing-agent` repo (`your-organization/your-test-automation/_git/manso-testing-agent`, checked out locally as `testing-mcp-workflow`):
 
-1. **`.manso/agent-package/.npmrc`** in the repository, pointing at the Azure Artifacts feed that hosts `manso-testing-agent`.
-2. **Read access to that npm feed** for the pipeline's build identity.
-3. **Key Vault access** to the configured `keyVaultName` for the `manso-testing-agent-*` secrets (`azureSubscription` service connection must be authorized for the pipeline).
-4. **A branch policy / PR build-validation policy** in Azure DevOps repo settings that actually triggers this pipeline on pull requests — the pipeline itself uses `trigger: none`, so nothing runs it automatically otherwise.
+1. **Key Vault access** to the configured `keyVaultName` for the `manso-testing-agent-*` secrets and `github-packages-token` (`azureSubscription` service connection must be authorized for the pipeline).
+2. A GitHub PAT classic with `read:packages` stored as `github-packages-token`.
+3. **A branch policy / PR build-validation policy** in Azure DevOps repo settings that actually triggers this pipeline on pull requests — the pipeline itself uses `trigger: none`, so nothing runs it automatically otherwise.
 
 Unlike the Xray implementation stage, this one does not need `.manso/testgen.md` or `.manso/repo-conventions.json` — those govern test authoring conventions, not PR review.
 
@@ -70,4 +67,4 @@ Unlike the Xray implementation stage, this one does not need `.manso/testgen.md`
 
 - `AZURE_DEVOPS_PAT` is set to `$(System.AccessToken)` — the pipeline's own OAuth token is sufficient for reading the PR diff and posting a comment; no separate PAT secret is needed.
 - The CLI resolves organization/project/repository/PR id from Azure DevOps predefined variables automatically; override with its own `--organization`/`--project`/`--repository`/`--pull-request-id` flags if needed (not currently exposed as template parameters).
-- `manso-testing-agent` is installed fresh into `installDirectory` on every run rather than relying on a repo-local install, so `packageSpec` is the single source of truth for which version runs.
+- The scoped GitHub package is installed fresh into `installDirectory` on every run; `packageSpec` pins the version. The stage creates a temporary `.npmrc` and passes the Key Vault token through `NODE_AUTH_TOKEN`; consumer repositories do not need an npm config file.

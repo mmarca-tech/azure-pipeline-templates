@@ -32,7 +32,7 @@ parameters:
     type: string
   - name: keyVaultSecretsFilter
     type: string
-    default: manso-testing-agent-username,manso-testing-agent-jira-url,manso-testing-agent-jira-token,manso-testing-agent-azure-devops-pat,manso-testing-agent-llm-provider,manso-testing-agent-llm-api-key,manso-testing-agent-llm-model,manso-testing-agent-otel-provider,manso-testing-agent-otel-enabled,manso-testing-agent-otel-project-name,manso-testing-agent-otel-endpoint,manso-testing-agent-otel-public-key,manso-testing-agent-otel-secret-key,manso-testing-agent-otel-batch,manso-testing-agent-otel-codex-forward,manso-testing-agent-openinference-hide-inputs,manso-testing-agent-openinference-hide-outputs,manso-testing-agent-xray-base-url,manso-testing-agent-client-id,manso-testing-agent-client-secret,manso-testing-agent-xray-test-link-type,manso-testing-agent-xray-test-link-direction,manso-testing-agent-enable-confluence
+    default: manso-testing-agent-username,manso-testing-agent-jira-url,manso-testing-agent-jira-token,manso-testing-agent-azure-devops-pat,manso-testing-agent-llm-provider,manso-testing-agent-llm-api-key,manso-testing-agent-llm-model,manso-testing-agent-otel-provider,manso-testing-agent-otel-enabled,manso-testing-agent-otel-project-name,manso-testing-agent-otel-endpoint,manso-testing-agent-otel-public-key,manso-testing-agent-otel-secret-key,manso-testing-agent-otel-batch,manso-testing-agent-otel-codex-forward,manso-testing-agent-openinference-hide-inputs,manso-testing-agent-openinference-hide-outputs,manso-testing-agent-xray-base-url,manso-testing-agent-client-id,manso-testing-agent-client-secret,manso-testing-agent-xray-test-link-type,manso-testing-agent-xray-test-link-direction,manso-testing-agent-enable-confluence,github-packages-token
   - name: nodeVersion
     type: string
     default: 20.x
@@ -41,7 +41,7 @@ parameters:
     default: 10.x
   - name: packageSpec
     type: string
-    default: manso-testing-agent@2.6.0
+    default: '@mmarca-tech/manso-testing-agent@0.1.4'
   - name: memoryRoot
     type: string
     default: https://dev.azure.com/your-organization/your-project/_git/your-agent-repository
@@ -63,9 +63,6 @@ parameters:
   - name: targetBranch
     type: string
     default: main
-  - name: npmrcPath
-    type: string
-    default: .manso/agent-package/.npmrc
   - name: outputDirectory
     type: string
     default: $(Pipeline.Workspace)/manso-testing-agent-implementation-output
@@ -237,13 +234,16 @@ stages:
             path: s/${{ parameters.templateRepo }}
 
           - task: PowerShell@2
-            displayName: Prepare Manso output and npm auth file
+            displayName: Prepare Manso output and GitHub package auth file
             inputs:
               pwsh: true
               targetType: inline
               script: |
                 New-Item -ItemType Directory -Path '${{ parameters.outputDirectory }}' -Force | Out-Null
-                Copy-Item -LiteralPath '$(Pipeline.Workspace)/s/repository/${{ parameters.npmrcPath }}' -Destination '${{ parameters.npmUserConfig }}' -Force
+                @(
+                  '@mmarca-tech:registry=https://npm.pkg.github.com'
+                  '//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}'
+                ) | Set-Content -LiteralPath '${{ parameters.npmUserConfig }}' -Encoding utf8
 
           - task: NodeTool@0
             displayName: Use Node.js ${{ parameters.nodeVersion }}
@@ -258,11 +258,6 @@ stages:
 
           - task: NuGetAuthenticate@1
             displayName: Authenticate Azure Artifacts NuGet feeds
-
-          - task: npmAuthenticate@0
-            displayName: Authenticate Azure Artifacts npm feed
-            inputs:
-              workingFile: ${{ parameters.npmUserConfig }}
 
           - task: AzureKeyVault@2
             displayName: Load manso-testing-agent secrets
@@ -307,6 +302,7 @@ stages:
               XRAY_TEST_LINK_DIRECTION: $(manso-testing-agent-xray-test-link-direction)
               SYSTEM_ACCESSTOKEN: $(System.AccessToken)
               NPM_CONFIG_USERCONFIG: ${{ parameters.npmUserConfig }}
+              NODE_AUTH_TOKEN: $(github-packages-token)
             inputs:
               pwsh: true
               targetType: inline
