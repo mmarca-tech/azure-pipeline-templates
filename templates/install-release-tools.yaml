@@ -1,0 +1,28 @@
+parameters:
+  - name: version
+    type: string
+    default: v1.0.0
+
+steps:
+  - task: Bash@3
+    displayName: Download Release Management Tools
+    inputs:
+      targetType: inline
+      script: |
+        set -euo pipefail
+        version="${RELEASE_TOOLS_VERSION:-${{ parameters.version }}}"
+        if [[ ! "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+          echo "Invalid ReleaseTools version: $version"
+          exit 1
+        fi
+
+        install_dir="$(Agent.TempDirectory)/release-management-tools"
+        if [ -x "$install_dir/ReleaseTools" ]; then exit 0; fi
+
+        archive="$(Agent.TempDirectory)/release-management-tools-$version.tar.gz"
+        url="https://github.com/mmarca-tech/release-management-tools/releases/download/$version/release-management-tools-linux-x64.tar.gz"
+        curl --fail --location --silent --show-error "$url" --output "$archive"
+        mkdir -p "$install_dir"
+        tar -xzf "$archive" -C "$install_dir"
+        chmod +x "$install_dir/ReleaseTools"
+        test -x "$install_dir/ReleaseTools"

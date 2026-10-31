@@ -181,6 +181,8 @@ stages:
             persistCredentials: true
             fetchDepth: 0
             fetchTags: true
+
+          - template: templates/install-release-tools.yaml@${{ parameters.templateRepo }}
           - pwsh: |
               Write-Host "##vso[task.setvariable variable=jiraBotEmail;isOutput=true;issecret=true]$(jiraBotEmail)"
               Write-Host "##vso[task.setvariable variable=jiraBotToken;isOutput=true;issecret=true]$(jiraBotToken)"
@@ -188,22 +190,15 @@ stages:
               Write-Host "##vso[task.setvariable variable=releaseProcessWebhookUrl;isOutput=true;issecret=true]$(releaseProcessWebhookUrl)"
             name: sharedVars
             displayName: Export shared release-process values
-          - task: UseDotNet@2
-            displayName: Use .NET 10 SDK
-            inputs:
-              packageType: 'sdk'
-              version: '10.x'
-          - task: DotNetCoreCLI@2
+          - task: Bash@3
             name: createTicket
             displayName: "Generate Release Notes and Create JIRA Ticket"
             env:
               SYSTEM_ACCESSTOKEN: $(System.AccessToken)
             inputs:
-              command: 'custom'
-              custom: 'run'
-              arguments: >
-                --file "$(Build.SourcesDirectory)/${{ parameters.templateRepo }}/scripts/ReleaseProcess.cs"
-                --
+              targetType: inline
+              script: >
+                "$(Agent.TempDirectory)/release-management-tools/ReleaseTools"
                 create-release-ticket
                 -Environment "${{ parameters.environment }}"
                 -JiraUrl "${{ parameters.jiraUrl }}"

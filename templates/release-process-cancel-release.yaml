@@ -37,19 +37,14 @@ stages:
         steps:
           - checkout: self
           - checkout: ${{ parameters.templateRepo }}
-          - task: UseDotNet@2
-            displayName: Use .NET 10 SDK
-            inputs:
-              packageType: 'sdk'
-              version: '10.x'
-          - task: DotNetCoreCLI@2
+
+          - template: templates/install-release-tools.yaml@${{ parameters.templateRepo }}
+          - task: Bash@3
             displayName: "Cancel JIRA Ticket"
             inputs:
-              command: 'custom'
-              custom: 'run'
-              arguments: >
-                --file "$(Build.SourcesDirectory)/${{ parameters.templateRepo }}/scripts/ReleaseProcess.cs"
-                --
+              targetType: inline
+              script: >
+                "$(Agent.TempDirectory)/release-management-tools/ReleaseTools"
                 transition-jira-ticket
                 -JiraUrl "${{ parameters.jiraUrl }}"
                 -JiraCloudId "$(jiraCloudId)"
@@ -71,19 +66,14 @@ stages:
         steps:
           - checkout: self
           - checkout: ${{ parameters.templateRepo }}
-          - task: UseDotNet@2
-            displayName: Use .NET 10 SDK
-            inputs:
-              packageType: 'sdk'
-              version: '10.x'
-          - task: DotNetCoreCLI@2
+
+          - template: templates/install-release-tools.yaml@${{ parameters.templateRepo }}
+          - task: Bash@3
             displayName: "Send Teams Notification"
             inputs:
-              command: 'custom'
-              custom: 'run'
-              arguments: >
-                --file "$(Build.SourcesDirectory)/${{ parameters.templateRepo }}/scripts/ReleaseProcess.cs"
-                --
+              targetType: inline
+              script: >
+                "$(Agent.TempDirectory)/release-management-tools/ReleaseTools"
                 update-stakeholders
                 -action "CANCELED"
                 -JiraTicketKey "$(jiraTicketKey)"

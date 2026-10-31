@@ -111,15 +111,14 @@ This repo includes [azure-pipelines.version-tag.yml](../azure-pipelines.version-
 
 ### Pull requests targeting `main`
 
-1. Validate scripts/YAML references.
-2. Run `tests/PipelineTemplates.Tests/PipelineTemplates.Tests.csproj`.
+1. Download ReleaseTools and validate scripts/YAML references.
 
 No version tag is created on PRs.
 
 ### Merges to `main`
 
-1. Same validate + test stage as PRs. The run succeeds when tests pass.
-2. The **Release version tag** stage uses a **manual stage trigger** (ADO does not allow `dependsOn` on manual stages). After **Test** succeeds, start the release stage from the run UI when you want to publish a tag. If you never start it, no tag is created and the pipeline stays successful.
+1. The validation stage downloads ReleaseTools and checks repository references.
+2. The **Release version tag** stage uses a **manual stage trigger** (ADO does not allow `dependsOn` on manual stages). After validation succeeds, start the release stage from the run UI when you want to publish a tag. If you never start it, no tag is created and the pipeline stays successful.
 3. When the release stage runs, it finds the latest `vX.Y.Z` tag, detects the bump from commits since that tag (including original PR commits after squash merges), then creates and pushes the next annotated tag.
 
 Queue with `autoRelease: true` only when you want the release stage to run without a manual click (for example unattended tagging).

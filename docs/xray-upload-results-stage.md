@@ -1,16 +1,15 @@
 # Xray Upload Results Stage
 
-Stage template that uploads test results to Jira Xray using [`xray-console-client`](https://dev.azure.com/your-organization/shared-quality-tools/_artifacts/feed/your-testing-feed/Npm/xray-console-client) (source: `your-testing-feed`, `src/javascript/xray-console-client`). It installs the package from the `your-testing-feed` Azure Artifacts feed and runs it against a results artifact produced by an earlier job.
+Stage template that uploads test results to Jira Xray using the `xray-console-client` .NET tool from GitHub Packages. It installs the configured NuGet version from `https://nuget.pkg.github.com/mmarca-tech/index.json` and runs it against a results artifact produced by an earlier job.
 
 **Template:** `templates/xray-upload-results-stage.yaml`
 
 ## What it does
 
 1. Downloads the results artifact published by an earlier job
-2. Installs Node.js and authenticates the Azure Artifacts npm feed (no `.npmrc` needed in the consumer repo)
-3. Loads the Xray and Jira secrets from Key Vault (same secret names as the Manso templates)
-4. Installs `xray-console-client` into a temp directory and runs it
-5. The client creates/updates the Xray test cases, creates (or updates) the test execution and links it to the test plan / issue
+2. Loads Xray, Jira, and GitHub Packages credentials from Key Vault
+3. Installs the pinned `xray-console-client` .NET tool into a temp directory
+4. The client creates/updates Xray test cases, creates (or updates) the test execution, and links it to the test plan / issue
 
 For `nunit-xml` reports the client reads `[FeatureKey("X-1")]` (linked as requirement) and `[TestCaseKey("X-2")]` (test case to update) from the report, turns every logged HTTP call into a step, and replaces the steps of an existing test case. See the package README for the other result types.
 
@@ -54,6 +53,7 @@ Empty means the option is not sent. With no `planKey` and no `executionKey` a ne
 | `dependsOn` | `[]` | Stage dependencies (the stage that publishes the results) |
 | `condition` | `succeededOrFailed()` | Default uploads results of failing test runs too |
 | `poolName` | `example-agent-pool` | Agent pool |
+| `dotnetSdkVersion` | `10.0.x` | .NET SDK used to install and run the tool |
 
 ### Optional: Xray and Jira instances
 
@@ -62,19 +62,19 @@ Empty means the option is not sent. With no `planKey` and no `executionKey` a ne
 | `xrayUrl` | `https://xray.cloud.getxray.app` | Xray host only, the client appends `/api/v2` |
 | `jiraUrl` | `https://your-domain.atlassian.net` | Jira base url |
 
-### Optional: package, feed and secrets
+### Optional: package and secrets
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `nodeVersion` | `20.x` | Node.js version |
-| `packageSpec` | `xray-console-client@2.2.0` | npm package/version to install |
-| `npmFeedUrl` | `your-testing-feed` feed | Azure Artifacts npm registry |
-| `npmUserConfig` / `installDirectory` | agent temp paths | Working files of the stage |
-| `keyVaultSecretsFilter` | Jira username/token + Xray client id/secret | Secrets to fetch |
+| `xrayClientVersion` | `1.0.0` | NuGet package version to install |
+| `githubPackagesUsername` | `mmarca-tech` | GitHub account used to authenticate to GitHub Packages |
+| `githubPackagesTokenSecretName` | `github-packages-token` | Key Vault secret containing a GitHub PAT (classic) with `read:packages` scope |
+| `installDirectory` | `$(Agent.TempDirectory)/xray-console-client-install` | Temporary tool install directory |
+| `keyVaultSecretsFilter` | Jira basic token + Xray client id/secret + GitHub Packages token | Key Vault secrets to fetch |
 
 ## Required Key Vault secrets
 
-`jira-basic-token` (Jira basic token, base64 of `email:api-token`), `jira-client-id` and `jira-client-secret` (Xray API key). The Xray and Jira urls are not secrets, see `xrayUrl` / `jiraUrl`.
+`jira-basic-token` (base64 of `email:api-token`), `jira-client-id` and `jira-client-secret` (Xray API key), and `github-packages-token` (GitHub PAT classic with `read:packages`). The token is passed to NuGet through a task-scoped environment variable; it is not written to the agent's persistent NuGet config. The Xray and Jira URLs are not secrets; set `xrayUrl` and `jiraUrl` directly.
 
 ## Usage
 
@@ -104,6 +104,8 @@ stages:
       resultsArtifactName: nunit-results
       projectKey: QATG
       planKey: QATG-3399
+      xrayClientVersion: 1.0.0
+      dotnetSdkVersion: 10.0.x
       summary: NUnit integration tests
 ```
 
@@ -142,22 +144,22 @@ Values marked `# default` are the template defaults and can be left out. All oth
       dependsOn: [Tests]                       # default: []
       condition: succeededOrFailed()           # default
       poolName: example-agent-pool       # default
+      dotnetSdkVersion: 10.0.x          # default
 
       # Xray and Jira instances
       xrayUrl: https://xray.cloud.getxray.app   # default, host only
       jiraUrl: https://your-domain.atlassian.net    # default
 
-      # Package, feed and secrets
-      nodeVersion: 20.x                        # default
-      packageSpec: xray-console-client@2.2.0   # default
-      npmFeedUrl: https://pkgs.dev.azure.com/your-organization/_packaging/your-testing-feed/npm/registry/   # default
-      npmUserConfig: $(Agent.TempDirectory)/xray-upload.npmrc              # default
+      # Package and secrets
+      xrayClientVersion: 1.0.0                # default
+      githubPackagesUsername: mmarca-tech     # default
+      githubPackagesTokenSecretName: github-packages-token  # default
       installDirectory: $(Agent.TempDirectory)/xray-console-client-install  # default
-      keyVaultSecretsFilter: jira-basic-token,jira-client-id,jira-client-secret   # default
+      keyVaultSecretsFilter: jira-basic-token,jira-client-id,jira-client-secret,github-packages-token  # default
 ```
 
 ## Prerequisites
 
-- The pipeline's build identity (`<Project> Build Service`) needs **Reader** on the `your-testing-feed` feed.
+- The GitHub PAT classic stored in Key Vault needs `read:packages` scope and access to the `xray-console-client` package.
 - The service connection in `azureSubscription` needs read access to the Key Vault secrets above.
 - The Xray client id/secret needs permission to create tests and executions in `projectKey`.

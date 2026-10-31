@@ -1,5 +1,0 @@
-<Solution>
-  <Folder Name="/tests/">
-    <Project Path="tests/PipelineTemplates.Tests/PipelineTemplates.Tests.csproj" />
-  </Folder>
-</Solution>

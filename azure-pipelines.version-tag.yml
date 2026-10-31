@@ -35,34 +35,20 @@ stages:
   - stage: test
     displayName: Test
     jobs:
-      - job: validate_and_test
-        displayName: Validate and run unit tests
+      - job: validate_repository
+        displayName: Validate repository
         steps:
           - checkout: self
             fetchDepth: 0
 
-          - task: UseDotNet@2
-            displayName: Use .NET 10 SDK
-            inputs:
-              packageType: 'sdk'
-              version: '10.x'
+          - template: templates/install-release-tools.yaml
 
-          - task: DotNetCoreCLI@2
+          - task: Bash@3
             displayName: Validate repository
             inputs:
-              command: 'custom'
-              custom: 'run'
-              arguments: >
-                --file ./scripts/ReleaseProcess.cs
-                --
-                validate-repository
-
-          - task: DotNetCoreCLI@2
-            displayName: Run pipeline template contract tests
-            inputs:
-              command: 'test'
-              projects: 'tests/PipelineTemplates.Tests/PipelineTemplates.Tests.csproj'
-              arguments: '--configuration Release'
+              targetType: inline
+              script: |
+                "$(Agent.TempDirectory)/release-management-tools/ReleaseTools" validate-repository
 
   # Manual stage trigger: if you do not run this stage, the pipeline succeeds after tests.
   # ManualValidation reject cannot succeed the run; a manual stage avoids that ADO limitation.
@@ -83,23 +69,17 @@ stages:
             persistCredentials: true
             fetchDepth: 0
 
-          - task: UseDotNet@2
-            displayName: Use .NET 10 SDK
-            inputs:
-              packageType: 'sdk'
-              version: '10.x'
+          - template: templates/install-release-tools.yaml
 
-          - task: DotNetCoreCLI@2
+          - task: Bash@3
             name: createVersionTag
             displayName: Compute and push semantic version tag
             env:
               SYSTEM_ACCESSTOKEN: $(System.AccessToken)
             inputs:
-              command: 'custom'
-              custom: 'run'
-              arguments: >
-                --file ./scripts/ReleaseProcess.cs
-                --
+              targetType: inline
+              script: >
+                "$(Agent.TempDirectory)/release-management-tools/ReleaseTools"
                 create-version-tag
                 -TagPrefix ${{ parameters.tagPrefix }}
                 -DefaultBump ${{ parameters.defaultBump }}
